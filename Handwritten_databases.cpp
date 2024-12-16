@@ -1,630 +1,1893 @@
-﻿#include<cstdio>
-#include<cmath>
-#include <malloc.h>
-#include <stdlib.h>
-#include <string.h>
-//数据类型标识枚举型 
-typedef enum {
-	CHAR = 1,
-	INT = 2,
-	LONG = 3,
-	FLOAT = 4,
-	DOUBLE = 5,
-	BOOL = 6,
-	Type = 7  //DataType枚举型标识 
-}DataType;
-typedef enum {
-	less_than = 0,
-	greater_than = 1,
-	equal_to = 2,
-	not_equal_to = 3,
-	less_equal = 4,
-	greater_equal = 5
-}CmpOperator;
+﻿#include<iostream>
+#include<string>
+#include<fstream>
+using namespace std;
 
-//pg_class数据字典表的元组结构体，存储表信息 
-typedef struct pg_class_tuple {
-	char TableName[20]; //表名 
-	int ID;             //表ID 
-	int ColNum;         //列数量 
-}PC_Tuple;
-//pg_attribute数据字典表的元组结构体 ，存储列信息 
-typedef struct pg_attribute_tuple {
-	char ColName[20]; //列名 
-	int BelongToID; //归属表的ID 
-	DataType Type;  //数据类型标识 
-	int TypeSize;   //数据字节长度 
-	int NoOfCol;    //列号 
-	bool AbleNull;  //是否可以为空，true为可以为空        ??????????字节数为4，不明原因 ,但是不影响正常读写 
-}PA_Tuple;
-//数据块头
-typedef struct PageHeadData {
-	int lower;//空闲开始位置 
-	int upper;//空闲结束位置
-	int special;//special开始位置 
-}PageHeadData;
-//元组存储信息
-typedef struct Item {
-	int tuple_start;  //元组位置 
-	int length;       //元组长度 
-	bool IsDeleted;   //删除标记 
-}Item;
-//过滤表达式
-typedef struct filter {
-	int ColNo;
-	CmpOperator CO;
-	char* Value;
-}Filter;
-//其它 
-typedef struct Buffer {
-	char TypeSetBuffer[50];
-	int MemoryLen;
-	int CurrentPos;
-	bool* pBool;
-	int* pInt;
-	long* pLong;
-	float* pFloat;
-	double* pDouble;
-	char* pChar;
-	int Int;
-	long Long;
-	float Float;
-	double Double;
-	bool Bool;
-}Buffer;
+/*一些测试指令
+* TABLE LIST
+* CREATE TABLE Student FROM student.txt
+* CREATE TABLE CS_Student FROM CS.txt
+* CREATE TABLE Student (学号,姓名,专业) TO student.txt
+* CREATE TBALE Lecture (课程编号,课程名称,任课老师) TO lecture.txt
+* DROP TABLE Lecture
+*
+* INSERT INTO Student VALUES (170000001,张三,计算机科学与技术)
+* INSERT INTO Student VALUES (170000002,李四,金融系)
+* INSERT INTO Student (学号,姓名) VALUES (170000003,王二)
+* INSERT INTO Student (学号,姓名,专业) VALUES (170000004,刘五,微电子)
+*
+* DELETE FROM Student WHERE 姓名 = 张三
+* DELETE * FROM Student
+*
+* UPDATE Student SET 学号 = 170000000, 专业 = 计算机科学与技术
+* UPDATE Student SET 学号 = 170000000, 专业 = 地球科学 WHERE 姓名 = 张三
+*
+* SELECT 学号,姓名 FROM Student
+* SELECT * FROM Student
+* SELECT 专业 FROM Student
+* SELECT DISTINCT 专业 FROM Student
+* SELECT * FROM Student ORDER BY 学号 DESC
+* SELECT 专业 FROM Student WHERE 姓名 = 张三
+* SELECT * FROM Student WHERE 姓名 = 张三
+* SELECT * FROM Student WHERE 专业 = 计算机科学与技术 TO CS.txt
+*
+* SELECT * FROM Student WHERE 学号 > 170000000
+* SELECT MAX(学号) FROM Student
+* SELECT * FROM Student WHERE 学号 < (SELECT MAX(学号) FROM Student)
+*/
 
-
-//标记未使用的表ID，当多次建表时可节省调用查找ID是否重复的函数调用 
-int IsIDOccupied = 10000;
-//块内排序使用
-int SortColFlag;
-char* page;
-//存储表列信息，可以去掉，我在函数中都作为参数传入，作为全局变量只是偷懒，不在函数中定义
-PC_Tuple* PCT;
-PA_Tuple* PAT;
-
-#define pg_class "1259"
-#define pg_attribute "1249"
-#define PAGESIZE 8192
-#define SPECIAL 8000
-
-//元组的输入函数 
-void InsertInput()
+/*
+* 这里是数据结构及函数声明~
+*/
+struct SQL //数据库结构体，包括表名和文件名和表格对应序号
 {
-	char* Tuple = NULL, TableName[20];
-	bool* IsNull = NULL;
-	int ID, InputNum, * ColPos = NULL, i, j, MaxMemoryLen;
-	Buffer buffer;
+    string table_name;
+    string file_name;
+    int index;
+};
+SQL my_sql[100]; //维护一个数据库状态数组
+int my_sql_num = 0; //当前数据库状态行数
 
-	PCT = (PC_Tuple*)malloc(sizeof(PC_Tuple));
+struct TABLE //表格结构体，包括表名，文件名，各列的属性名，行数列数
+{
+    string table_name;
+    string file_name;
+    string column[50];
+    int col_num = 0;
+    int row_num = 0;
+};
+TABLE all_table[100]; //维护一个全体表格数组
+int table_num = 0; //当前数据库表格数量
 
-	printf("请输入你要插入的表名称\nInput-->");
-	scanf("%s", TableName);
-	for (; strnicmp(TableName, "pg_class", 8) == 0 ||
-		strnicmp(TableName, "pg_attribute", 12) == 0 ||
-		GetTableInfoByName(TableName, PCT) != 1;)
-	{
-		printf("您要插入的表不存在,请重新输入,quit退出\nInput-->");
-		scanf("%s", TableName);
-		if (strnicmp(TableName, "quit", 4) == 0)exit(0);
-	}
+string table_data[100][100]; //维护一个数据二维数组，用于暂时存储更新的表格数据
+int row = 0, col = 0; //当前表格数据行列数
 
-	PAT = (PA_Tuple*)malloc(sizeof(PA_Tuple) * PCT->ColNum);
+//读取数据库文件
+void read_my_sql();
 
-	if (GetColInfo(PCT->ID, PAT, PCT->ColNum) != PCT->ColNum)
-	{
-		printf("获取的列数与pg_class中的记录不符,表信息错误\n");
-		exit(1);
-	}
+//写入数据库文件
+void write_my_sql();
 
-	//对得到的列数据按照NoOfCol排序 
-	qsort(PAT, PCT->ColNum, sizeof(PA_Tuple), Sort_Colnum);
+//读取所有表格及其属性
+void read_all_table();
 
-	//标记属性是否已输入 
-	ColPos = (int*)malloc(sizeof(int) * PCT->ColNum);
-	IsNull = (bool*)malloc(sizeof(bool) * PCT->ColNum);
+//读取表头
+void read_table(int index, string filename);
 
-	for (i = 0, MaxMemoryLen = 0; i < PCT->ColNum; i++)
-	{
-		MaxMemoryLen += PAT[i].TypeSize;
-	}
-	Tuple = (char*)malloc(sizeof(char) * MaxMemoryLen);
+//写入表头
+void write_table(int index, string filename);
 
-	for (getchar(), printf("回车键退出，任意键开始插入元组\nInput-->");
-		getchar() != '\n';
-		printf("回车键退出，任意键开始插入元组\nInput-->"))
-	{
-		fflush(stdin);
-	errorloop: printf("CHAR=1,INT=2,LONG=3,FLOAT=4,DOUBLE=5,[0/1]BOOL=6\n");
-		for (i = 0; i < PCT->ColNum; i++)
-			printf("[%3d.%20s 类型：%2d 是否可以为空：%2d]\n",
-				PAT[i].NoOfCol, PAT[i].ColName, PAT[i].Type, PAT[i].AbleNull);
-		printf("\n");
+//读取表格数据
+void read_table_data(int index, string filename);
 
-		for (i = 0, buffer.MemoryLen = 0; i < PCT->ColNum; i++)
-		{
+//写入表格数据
+void write_table_data(int index, string filename);
 
-			//初始化Tuple空间 
-			if (i == 0)memset(Tuple, '\0', buffer.MemoryLen);
-			//检测各值是否可以为空，可以则让用户输入该值是否空 ，不可则跳过 
-			if (PAT[i].AbleNull == true)
-			{
-				printf("该属性值可为空，是否空[0/1]\nInput-->");
-				scanf("%d", &buffer.Int);
-				if (buffer.Int == 0)IsNull[i] = false;
-				else if (buffer.Int == 1)
-				{
-					IsNull[i] = true;
-					continue;
-				}
-				else
-				{
-					printf("%s 非法输入\n", PAT[i].ColName);
-					goto errorloop;
-				}
-			}
-			else if (PAT[i].AbleNull == false)
-			{
-				IsNull[i] = false;
-			}
-			printf("%s:", PAT[i].ColName);
-			switch (PAT[i].Type)
-			{
-			case BOOL:  scanf("%d", &buffer.Int);
-				if (buffer.Int == 0)*((bool*)(Tuple + buffer.MemoryLen)) = false;
-				else if (buffer.Int == 1)*((bool*)(Tuple + buffer.MemoryLen)) = true;
-				else
-				{
-					printf("%s 非法输入\n", PAT[i].ColName);
-					goto errorloop;
-				}
-				buffer.MemoryLen += sizeof(bool);
-				break;
-			case DOUBLE:scanf("%lf", &buffer.Double);
-				memcpy((Tuple + buffer.MemoryLen), &buffer.Double, sizeof(double));
-				buffer.MemoryLen += sizeof(double);
-				break;
-			case FLOAT: scanf("%f", &buffer.Float);
-				memcpy((Tuple + buffer.MemoryLen), &buffer.Float, sizeof(float));
-				buffer.MemoryLen += sizeof(float);
-				break;
-			case LONG:  scanf("%ld", &buffer.Long);
-				memcpy((Tuple + buffer.MemoryLen), &buffer.Long, sizeof(long));
-				buffer.MemoryLen += sizeof(long);
-				break;
-			case INT:   scanf("%d", &buffer.Int);
-				memcpy((Tuple + buffer.MemoryLen), &buffer.Int, sizeof(int));
-				buffer.MemoryLen += sizeof(int);
-				break;
-			case CHAR:	scanf("%s", buffer.TypeSetBuffer);
-				if ((buffer.Int = strlen(buffer.TypeSetBuffer)) >= PAT[i].TypeSize)
-				{
-					printf("%s输入的字符串溢出\n", PAT[i].ColName);
-					goto errorloop;
-				}
-				strcpy((Tuple + buffer.MemoryLen), buffer.TypeSetBuffer);
-				buffer.MemoryLen += sizeof(char) * (buffer.Int + 1);
-				break;
-			default:    printf("错误"); i--;
-			}
-			printf("位置：%d\n", buffer.MemoryLen);
-		}
-		insert(Tuple, IsNull, PCT->ID, PCT->ColNum, sizeof(char) * buffer.MemoryLen);
-		printf("插入成功!\n");
-		fflush(stdin);
-	}
-	free(PCT);
-	free(PAT);
-	free(Tuple);
-	free(ColPos);
+//根据指令创建表格
+void Create_table(char ins[]);
+
+//根据指令删除表格
+void Drop_table(char ins[]);
+
+//查看所有表格
+void Table_list();
+
+//向表格中插入数据
+void Insert_table_data(char ins[]);
+
+//删除表格数据
+void Delete_table_data(char ins[]);
+
+//修改表格数据
+void Updata_table_data(char ins[]);
+
+//选择表格数据并展示
+void Selete_table_data(char ins[]);
+
+//打印表格数据
+void printf_table(int index);
+
+//打印所有表格列表
+void printf_table_list();
+
+//判断是否为空行（即m是否为字母）
+bool is_not_endl(char m);
+
+/*
+* 这里是主函数~
+*/
+int main()
+{
+    cout << "\033[33m-----\033[32mWelcome \033[35mto \033[36mmySQL!\033[33m-----\033[0m" << endl;
+    while (true)
+    {
+        cout << "(mysql)==>";
+        char ins[100]; //用来接受指令
+        cin.getline(ins, 100);
+
+        //Quit 退出数据库
+        if (ins[0] == 'q' && ins[1] == 'u' && ins[2] == 'i' && ins[3] == 't')
+        {
+            cout << "\033[33m-----\033[32mQuit \033[36mmySQL!\033[33m-----\033[0m" << endl;
+            break;
+        }
+
+        //CREATE TABLE      创建表格功能
+        else if (ins[0] == 'C' && ins[1] == 'R' && ins[2] == 'E' && ins[3] == 'A' && ins[4] == 'T' && ins[5] == 'E')
+        {
+            Create_table(ins);
+        }
+
+        //DROP TABLE        删除表格功能    
+        else if (ins[0] == 'D' && ins[1] == 'R' && ins[2] == 'O' && ins[3] == 'P')
+        {
+            Drop_table(ins);
+        }
+
+        //TABLE LIST        查看所有表格
+        else if ((ins[0] == '0') || (ins[0] == 'T' && ins[1] == 'A' && ins[2] == 'B' && ins[3] == 'L' && ins[4] == 'E'))
+        {
+            Table_list();
+        }
+
+        //INSERT INTO       插入数据
+        else if (ins[0] == 'I' && ins[1] == 'N' && ins[2] == 'S' && ins[3] == 'E' && ins[4] == 'R' && ins[5] == 'T')
+        {
+            Insert_table_data(ins);
+        }
+
+        //DELETE        删除数据
+        else if (ins[0] == 'D' && ins[1] == 'E' && ins[2] == 'L' && ins[3] == 'E' && ins[4] == 'T' && ins[5] == 'E')
+        {
+            Delete_table_data(ins);
+        }
+
+        //UPDATE        更新数据
+        else if (ins[0] == 'U' && ins[1] == 'P' && ins[2] == 'D' && ins[3] == 'A' && ins[4] == 'T' && ins[5] == 'E')
+        {
+            Updata_table_data(ins);
+        }
+
+        //SELECT        选择数据
+        else if (ins[0] == 'S' && ins[1] == 'E' && ins[2] == 'L' && ins[3] == 'E' && ins[4] == 'C' && ins[5] == 'T')
+        {
+            Selete_table_data(ins);
+        }
+
+        //ERROR     指令错误
+        else
+        {
+            cout << "Error instruction!" << endl;
+        }
+    }
+
+    return 0;
 }
 
-//通过表名获取表信息 
-int GetTableInfoByName(char* TableName, PC_Tuple* PCT)
+/*
+* 下面是函数的定义~
+*/
+
+//读取数据库状态文件
+void read_my_sql()
 {
-	int status = 0;
-	FILE* fp = NULL;
-	PC_Tuple temp;
-	int i;
-	//读写二进制文件 
-	if ((fp = fopen(pg_class, "rb")) == NULL)
-	{
-		printf("1259打开失败:GetTableInfoByName()\n");
-		exit(1);
-	}
+    my_sql_num = 0; //读入新状态前先将原状态归零
+    const string my_sql_filename = "my_sql.txt"; //设置数据库状态文件名
 
-	//循环遍历pg_class文件，直到找到ID对应的表信息，若直到文件尾仍然未找到，则退出循环 
-	for (i = 0; feof(fp) == 0; i++)
-	{
-		fseek(fp, sizeof(PC_Tuple) * i, SEEK_SET);
-		if (fread(&temp, sizeof(PC_Tuple), 1, fp) == 0)break;
-		if (strnicmp(TableName, temp.TableName, 20) == 0)
-		{
-			*PCT = temp;
-			status = 1;
-			break;
-		}
-	}
-	if (fclose(fp) != 0)
-	{
-		printf("1259关闭失败:GetTableInfoByName()\n");
-		exit(1);
-	}
+    //打开文件，若文件不存在，则创建文件
+    ifstream in_file(my_sql_filename, ios::_Noreplace);
 
-	return status;
+    while (in_file.peek() != EOF)
+    {
+        in_file >> my_sql[my_sql_num].table_name;
+        in_file >> my_sql[my_sql_num].file_name;
+        in_file >> my_sql[my_sql_num].index;
+        if (is_not_endl(my_sql[my_sql_num].table_name[0]) == 1)
+            my_sql_num++;
+    }
+
+    in_file.close();
 }
 
-//获取具有空闲空间的页
-int GetThePageHaveEnoughSpace(char* Page, int Size, FILE* fp)
+//写入数据库状态文件
+void write_my_sql()
 {
-	int i, status = -1;
-	for (i = 0; feof(fp) == 0; i++)
-	{
-		fseek(fp, PAGESIZE * i, SEEK_SET);
-		if (fread(Page, PAGESIZE, 1, fp) == 0)break;
-		if (((((PageHeadData*)Page)->upper) - (((PageHeadData*)Page)->lower)) >= Size)
-		{
-			status = i;
-			return status;
-		}
-	}
-	status = -i;
-	return status;
+    const string my_sql_filename = "my_sql.txt"; //设置数据库状态文件名
+    ofstream out_file(my_sql_filename, ios::out);
+    for (int i = 0; i < my_sql_num; i++)
+    {
+        //表名 文件名 下标
+        out_file << my_sql[i].table_name << " ";
+        out_file << my_sql[i].file_name << " ";
+        out_file << my_sql[i].index << endl;
+    }
+    out_file.close();
 }
 
-//按ID检测表是否存在，如存在则返回表信息，返回值为1找到，0为未找到 
-int GetTableInfo(int ID, PC_Tuple* PCT)
+//读取所有表格及其属性
+void read_all_table()
 {
-	int status = 0;
-	FILE* fp = NULL;
-	PC_Tuple temp;
-	int i;
-	//读写二进制文件 
-	if ((fp = fopen(pg_class, "rb")) == NULL)
-	{
-		printf("1259打开失败:GetTableInfo()\n");
-		exit(1);
-	}
+    table_num = 0; //表格数归零
 
-	//循环遍历pg_class文件，直到找到ID对应的表信息，若直到文件尾仍然未找到，则退出循环 
-	for (i = 0; feof(fp) == 0; i++)
-	{
-		fseek(fp, sizeof(PC_Tuple) * i, SEEK_SET);
-		if (fread(&temp, sizeof(PC_Tuple), 1, fp) == 0)break;
-		if (temp.ID == ID)
-		{
-			*PCT = temp;
-			status = 1;
-			break;
-		}
-	}
-	if (fclose(fp) != 0)
-	{
-		printf("1259关闭失败:GetTableInfo()\n");
-		exit(1);
-	}
-	return status;
+    for (int i = 0; i < my_sql_num; i++)
+    {
+        //每读一行数据库信息都会得到一张表
+        int ind = my_sql[i].index;
+        all_table[ind].table_name = my_sql[i].table_name;
+        all_table[ind].file_name = my_sql[i].file_name;
+        read_table(ind, my_sql[i].file_name);
+        if (is_not_endl(all_table[ind].file_name[0]) == 1)
+            table_num++;
+    }
 }
 
-//按ID检测表属性，返回表属性列 ，返回值为找到的列数 
-int GetColInfo(int ID, PA_Tuple* PAT, int ColNum)
+//读取表头
+void read_table(int index, string filename)
 {
-	FILE* fp = NULL;
-	PA_Tuple temp;
-	int i, count;
+    all_table[index].col_num = 0; //读入表头前先将表格列数归零
 
-	if ((fp = fopen(pg_attribute, "rb")) == NULL)
-	{
-		if (fclose(fp) != 0)
-		{
-			printf("1249关闭失败:GetColInfo()\n");
-			exit(1);
-		}
-	}
-	for (i = 0, count = 0; feof(fp) == 0; i++)
-	{
-		fseek(fp, sizeof(PA_Tuple) * i, SEEK_SET);
-		if (fread(&temp, sizeof(PA_Tuple), 1, fp) == 0)break;
-		if (temp.BelongToID == ID)
-		{
-			PAT[count] = temp;
-			count++;
-			if (count == ColNum)break;
-		}
-	}
-	if (fclose(fp) != 0)
-	{
-		printf("1249关闭失败:GetColInfo()\n");
-		exit(1);
-	}
-	return count;
+    //打开文件，若文件不存在，则创建文件
+    ifstream in_file(filename, ios::_Noreplace);
+    string s;
+    getline(in_file, s);
+    int i = 0;
+
+    //解析表头
+    while (i < s.size())
+    {
+        int k = 0;
+        string str;
+        if (s[i + k] == ' ') //规避汉字中间的两个空格
+            i++;
+        while (i + k != s.size() && s[i + k] != ' ')
+        {
+            str += s[i + k];
+            k++;
+        }
+
+        int c = all_table[index].col_num;
+        all_table[index].column[c] = str;
+        all_table[index].col_num++;
+        i = i + k + 1;
+    }
+
+    in_file.close();
 }
 
-//qsort()函数调用 
-int Sort_Colnum(const void* elem1, const void* elem2)
+//写入表头
+void write_table(int index, string filename)
 {
-	PA_Tuple* pac1 = (PA_Tuple*)elem1;
-	PA_Tuple* pac2 = (PA_Tuple*)elem2;
-	return (pac1->NoOfCol) - (pac2->NoOfCol);
+    ofstream out_file(filename, ios::out);
+    for (int i = 0; i < all_table[index].col_num; i++)
+        out_file << all_table[index].column[i] << " ";
+    out_file << endl;
+    out_file.close();
 }
 
-//扩展页 
-int extend(FILE* fp)
+//读取表格数据
+void read_table_data(int index, string filename)
 {
-	char* p = NULL;
-	int status;
-	p = (char*)malloc(PAGESIZE);
-	memset(p, '\0', PAGESIZE);
-	init_Page(p);
+    all_table[index].row_num = 0; //读入表头前先将表格行数归零
 
-	fseek(fp, 0, SEEK_END);
-	if (fwrite(p, PAGESIZE, 1, fp) == 0)
-	{
-		printf("创建新页失败：extend（）\n");
-	}
-	free(p);
+    //打开文件，若文件不存在，则创建文件
+    ifstream in_file(filename, ios::_Noreplace);
 
+    //先读表头
+    string s;
+    getline(in_file, s);
+
+    //剩下的是表格数据
+    while (in_file.peek() != EOF)
+    {
+        for (int j = 0; j < all_table[index].col_num; j++)
+            in_file >> table_data[all_table[index].row_num][j]; //用二维数组接受表格信息
+        if (table_data[all_table[index].row_num][0] >= "0" && table_data[all_table[index].row_num][0] <= "9")
+            all_table[index].row_num++;
+    }
+    in_file.close();
 }
 
-//初始化PAGE 
-void init_Page(char* PAGE)
+//写入表格数据
+void write_table_data(int index, string filename)
 {
-	PageHeadData* PHD = NULL;
-	PHD = (PageHeadData*)malloc(sizeof(PageHeadData));
-	PHD->lower = sizeof(PageHeadData);
-	PHD->special = SPECIAL;
-	PHD->upper = SPECIAL;
-	memcpy(PAGE, PHD, sizeof(PageHeadData));
-	free(PHD);
+    ofstream out_file(filename, ios::out);
+    //写入表头
+    for (int i = 0; i < all_table[index].col_num; i++)
+    {
+        out_file << all_table[index].column[i] << " ";
+    }
+    out_file << endl;
+
+    //写入数据
+    for (int i = 0; i < all_table[index].row_num; i++)
+    {
+        for (int j = 0; j < all_table[index].col_num; j++)
+        {
+            out_file << table_data[i][j] << " ";
+        }
+        out_file << endl;
+    }
+    out_file.close();
 }
 
-//插入函数，用于插入表信息，第一个参数为插入内容，第二个为要插入表的ID
-//第三个为插入列个数，第四个为单个元组的尺寸 
-int insert(void* Tuple, bool* IsNull, int ID, int InputNum, int Size)
+//根据指令创建表格，获取表名、文件名、属性名等
+void Create_table(char ins[])
 {
-	FILE* fp = NULL;
-	int i, j, status, ThePageFind;
-	char* PAGE = NULL;
-	char str[10];
-	Item item;
-	PageHeadData* PHD = NULL;
+    //先读取数据库状态文件和现有表格列表
+    read_my_sql();
+    read_all_table();
 
-	if (ID == 1259)
-	{
-		if ((fp = fopen(pg_class, "ab+")) == NULL)
-		{
-			printf("1259打开失败:insert()\n");
-			exit(1);
-		}
-		if (fwrite((PC_Tuple*)Tuple, Size, 1, fp) != 1)
-		{
-			printf("1259写入失败：insert()\n");
-			exit(1);
-		}
-		if (fclose(fp) != 0)
-		{
-			printf("1259关闭失败:insert()\n");
-			exit(1);
-		}
-	}
-	else if (ID == 1249)
-	{
-		if ((fp = fopen(pg_attribute, "ab+")) == NULL)
-		{
-			printf("1249打开失败:insert()\n");
-			exit(1);
-		}
-		if (fwrite((PA_Tuple*)Tuple, Size, 1, fp) != 1)
-		{
-			printf("1249写入失败：insert()\n");
-			exit(1);
-		}
-		if (fclose(fp) != 0)
-		{
-			printf("1249关闭失败:insert()\n");
-			exit(1);
-		}
-	}
-	//任意表插入 
-	else
-	{
-		if ((fp = fopen(itoa(ID, str, 10), "rb+")) == NULL)
-		{
-			printf("%d 打开失败：insert()\n", ID);
-			exit(1);
-		}
-		PAGE = (char*)malloc(PAGESIZE);
-		PHD = (PageHeadData*)malloc(sizeof(PageHeadData));
-		fseek(fp, 0, SEEK_END);
-		if (ftell(fp) == 0)
-		{
-			printf("PAGE数据消失，请检查文件是否丢失，为保证运行，将开辟新页！\n");
-			extend(fp);
-		}
-		//获取有空闲空间的Page，正数返回值的为第几个page页，负数返回值为找不到，其绝对值为总页数 
-		if ((ThePageFind = GetThePageHaveEnoughSpace(PAGE, Size + sizeof(Item) + sizeof(bool) * InputNum, fp)) < 0)
-		{
-			extend(fp);
-		}
-		else
-		{
-			item.IsDeleted = false;
-			item.length = Size;
+    //解析指令获取表名，记录到总表格数组中
+    string tablename;
+    int i = 13; //移动到指令中name的第一位
+    while (ins[i] != ' ')
+    {
+        tablename += ins[i];
+        i++;
+    }
+    all_table[table_num].table_name = tablename;
 
-			PHD = (PageHeadData*)PAGE;
-			PHD->upper = PHD->upper - sizeof(char) * item.length - sizeof(bool) * InputNum;
-			PHD->special = SPECIAL;
-			item.tuple_start = PHD->upper;
-			memcpy((PAGE + PHD->lower), &item, sizeof(Item));
-			PHD->lower += sizeof(Item);
-			memcpy((PAGE + PHD->upper), IsNull, sizeof(bool) * InputNum);
-			memcpy(PAGE + PHD->upper + sizeof(bool) * InputNum, (char*)Tuple, sizeof(char) * Size);
-			memcpy(PAGE, PHD, sizeof(PageHeadData));
+    i += 1;
+    //第一类创建语句
+    if (ins[i] == '(')
+    {
+        //检测表格名是否重复
+        for (int j = 0; j < my_sql_num; j++)
+        {
+            if (my_sql[j].table_name == tablename)
+            {
+                //表格名已存在
+                cout << "TABLE " << tablename << " Already Exists !" << endl;
+                return;
+            }
+        }
+        //解析指令获取每一列的属性名，记录到总表格数组中
+        i += 1; //移动到指令中column[i]的第一位
+        int k = 0;
+        string col_name[50];
+        col = 0;
+        while (true)
+        {
+            col_name[col] += ins[i + k];
+            k++;
+            if (ins[i + k] == ',' || ins[i + k] == '，')
+            {
+                //把每列的名字给到对应表格的column数组中，对应列数+1
+                int c = all_table[table_num].col_num;
+                all_table[table_num].column[c] = col_name[col];
+                all_table[table_num].col_num++; col++;
+                //移动至下一个列名的第一位
+                i = i + k + 1;
+                k = 0;
+            }
+            else if (ins[i + k] == ')' || ins[i + k] == '）')
+            {
+                //把每列的名字给到对应表格的column数组中，对应列数+1
+                int c = all_table[table_num].col_num;
+                all_table[table_num].column[c] = col_name[col];
+                all_table[table_num].col_num++; col++;
+                i = i + k + 1;
+                break;
+            }
+        }
 
-			fseek(fp, ThePageFind * PAGESIZE, SEEK_SET);
-			if (fwrite(PAGE, PAGESIZE, 1, fp) != 1)
-			{
-				printf("%d 写入失败:insert()", ID);
-				exit(1);
-			}
-			if ((fclose(fp)) != 0)
-			{
-				printf("%d 关闭失败：insert()\n", ID);
-				exit(1);
-			}
-		}
-		free(PAGE);
-	}
-	return 0;
+        //解析指令获取文件名，记录到总表格数组中
+        i += 4; //移动到指令中file的第一位
+        string filename;
+        while (ins[i] != '\0')
+        {
+            filename += ins[i];
+            i++;
+        }
+        all_table[table_num].file_name = filename;
+
+        //创建表格文件并写入表头
+        write_table(table_num, filename);
+
+        //修改数据库状态
+        my_sql[my_sql_num].table_name = tablename;
+        my_sql[my_sql_num].file_name = filename;
+        my_sql[my_sql_num].index = table_num;
+        my_sql_num++;
+        write_my_sql(); //更新数据库状态文件
+
+        table_num++; //最后，表格数量加一
+
+        //展示最新创建的表头
+        cout << "--------------------" << endl;
+        cout << "ID ";
+        for (int i = 0; i < all_table[table_num - 1].col_num; i++)
+        {
+            cout << all_table[table_num - 1].column[i] << " ";
+        }
+        cout << endl;
+        cout << "--------------------" << endl;
+    }
+
+    //第二类创建语句（相当于打印已有表格）
+    else if (ins[i] == 'F')
+    {
+        int index;
+        string filename;
+        bool flag = 1;
+        for (int j = 0; j < my_sql_num; j++)
+        {
+            if (my_sql[j].table_name == tablename)
+            {
+                //找到了对应的表格
+                index = my_sql[j].index;
+                filename = my_sql[j].file_name;
+                read_table_data(index, filename);
+                printf_table(index);
+                flag = 0;
+                break;
+            }
+            else if (my_sql[j].table_name == "None")
+            {
+                //给无名氏表格命名
+                my_sql[j].table_name = tablename;
+                write_my_sql();
+                index = my_sql[j].index;
+                filename = my_sql[j].file_name;
+                read_table_data(index, filename);
+                printf_table(index);
+                flag = 0;
+                break;
+            }
+        }
+        if (flag == 1) //没找到
+        {
+            cout << "Not found TABLE " << tablename << " !" << endl;
+            return;
+        }
+    }
+
+    else
+    {
+        cout << "Error instruction!" << endl;
+    }
 }
 
-//char()输入处理，忽略大小写 
-int DealWithCharInput(char* pInputChar, int n)
+//根据指令删除表格
+void Drop_table(char ins[])
 {
-	int i, count = 0;
-	int Return = 0;
-	if ((pInputChar[0] == 'C' || pInputChar[0] == 'c') &&
-		(pInputChar[1] == 'H' || pInputChar[1] == 'h') &&
-		(pInputChar[2] == 'A' || pInputChar[2] == 'a') &&
-		(pInputChar[3] == 'R' || pInputChar[3] == 'r'))
-	{
-		if (pInputChar[4] == '(')
-		{
-			for (i = 5; pInputChar[i] >= '0' && pInputChar[i] <= '9' && i < n; i++)count++;
-			for (i = 5; pInputChar[i] >= '0' && pInputChar[i] <= '9' && i < n; i++)
-			{
-				Return += (pInputChar[i] - '0') * pow(10, count - 1);
-				count--;
-			}
-			return Return;
-		}
-		else if (pInputChar[4] == '\0' || pInputChar[4] == '\n')
-			return 1;
-	}
-	else return 0;
+    //先读取数据库状态文件和现有表格列表
+    read_my_sql();
+    read_all_table();
+
+    //解析指令获取待删除表名
+    string tablename;
+    int i = 11;
+    while (ins[i] != '\0')
+    {
+        tablename += ins[i];
+        i++;
+    }
+
+    bool flag = 1;
+    for (int j = 0; j < my_sql_num; j++)
+    {
+        if (my_sql[j].table_name == tablename)
+        {
+            //找到待删的表格，则进行数据迁移
+            for (int k = j; k < my_sql_num - 1; k++)
+            {
+                my_sql[k].table_name = my_sql[k + 1].table_name;
+                my_sql[k].file_name = my_sql[k + 1].file_name;
+            }
+            table_num--;
+            my_sql_num--;
+            flag = 0;
+            cout << "DROP TABLE SUCCESS !" << endl;
+            break;
+        }
+    }
+
+    if (flag == 1) //没找到
+    {
+        cout << "Not found TABLE " << tablename << " !" << endl;
+        return;
+    }
+
+    write_my_sql(); //更新数据库状态文件
+    read_all_table(); //修改当前表格列表
 }
 
-//通过名字显示表的全部内容 
-void ShowTable()
+//查看所有表格
+void Table_list()
 {
-	int i, j, k, ColPos;
-	FILE* fp = NULL;
-	Buffer buffer;
-	char* PAGE = NULL;
-	PageHeadData* PHD = NULL;
-	Item* item = NULL;
-	bool* IsNull = NULL;
-	char TableName[20];
-
-	PAGE = (char*)malloc(sizeof(char) * PAGESIZE);
-	item = (Item*)malloc(sizeof(Item));
-	PCT = (PC_Tuple*)malloc(sizeof(PC_Tuple));
-
-	printf("请输入你要查看的表名称\nInput-->");
-	scanf("%s", TableName);
-	for (; strnicmp(TableName, "pg_class", 8) == 0 ||
-		strnicmp(TableName, "pg_attribute", 12) == 0 ||
-		GetTableInfoByName(TableName, PCT) != 1;)
-	{
-		printf("您要查看的表不存在,请重新输入,quit退出\nInput-->");
-		scanf("%s", TableName);
-		if (strnicmp(TableName, "quit", 4) == 0)exit(0);
-	}
-
-	IsNull = (bool*)malloc(sizeof(bool) * PCT->ColNum);
-	PAT = (PA_Tuple*)malloc(sizeof(PA_Tuple) * PCT->ColNum);
-
-	if (GetColInfo(PCT->ID, PAT, PCT->ColNum) != PCT->ColNum)
-	{
-		printf("列信息不全：%d\n", PCT->ID);
-		exit(1);
-	}
-
-	//给取出的列排序//便于解释 
-	qsort(PAT, PCT->ColNum, sizeof(PA_Tuple), Sort_Colnum);
-
-	if ((fp = fopen(itoa(PCT->ID, buffer.TypeSetBuffer, 10), "rb")) == NULL)
-	{
-		printf("%d 打开失败：ShowTable()\n", PCT->ID);
-		exit(1);
-	}
-	//获取每个块 
-	for (i = 0; feof(fp) == 0; i++)
-	{
-		fseek(fp, PAGESIZE * i, SEEK_SET);
-		if (fread(PAGE, PAGESIZE, 1, fp) == 0)break;
-		PHD = (PageHeadData*)PAGE;
-
-		//每个元组获取 
-		for (k = 0;
-			(sizeof(PageHeadData) + sizeof(Item) * k) < PHD->lower;
-			k++)
-		{
-			memcpy(item, (Item*)(PAGE + sizeof(PageHeadData) + sizeof(Item) * k), sizeof(Item));
-
-			//检测是否已被删除 
-			if (item->IsDeleted == true)continue;
-			memcpy(IsNull, (bool*)(PAGE + item->tuple_start), PCT->ColNum * sizeof(bool));
-			buffer.pChar = (char*)malloc(sizeof(char) * (item->length));
-			memcpy(buffer.pChar, (PAGE + item->tuple_start), PCT->ColNum * sizeof(bool));
-
-			memcpy(buffer.pChar, (PAGE + item->tuple_start + PCT->ColNum * sizeof(bool)), sizeof(char) * item->length);
-			//输出每个属性 
-
-			for (j = 0, ColPos = 0; j < PCT->ColNum; j++)
-			{
-				printf("%d    :", ColPos);
-				if (IsNull[j] == true)
-				{
-					printf("%s[null] ", PAT[j].ColName);
-					continue;
-				}
-				else
-				{
-					switch (PAT[j].Type)
-					{
-					case BOOL:  if (*((int*)(buffer.pChar + ColPos)) == 1)printf("%s[true] ", PAT[j].ColName);
-							 else printf("%s[true] ", PAT[j].ColName);
-						ColPos += sizeof(bool);
-						break;
-					case DOUBLE:buffer.pDouble = (double*)(buffer.pChar + ColPos);
-						printf("%s[%lf] ", PAT[j].ColName, *buffer.pDouble);
-						ColPos += sizeof(double);
-						break;
-					case FLOAT: buffer.pFloat = (float*)(buffer.pChar + ColPos);
-						printf("%s[%f] ", PAT[j].ColName, *buffer.pFloat);
-						ColPos += sizeof(float);
-						break;
-					case LONG:  buffer.pLong = (long*)(buffer.pChar + ColPos);
-						printf("%s[%ld] ", PAT[j].ColName, *buffer.pLong);
-						ColPos += sizeof(long);
-						break;
-					case INT:   buffer.pInt = (int*)(buffer.pChar + ColPos);
-						printf("%s[%d] ", PAT[j].ColName, *buffer.pInt);
-						ColPos += sizeof(int);
-						break;
-					case CHAR:  printf("%s[%s] ", PAT[j].ColName, (buffer.pChar + ColPos));
-						ColPos += (strlen(buffer.pChar + ColPos) + 1);
-						break;
-					default:    printf("错误"); i--;
-					}
-				}
-
-			}
-			printf("\n");
-			free(buffer.pChar);
-		}
-	}
-	free(IsNull);
-	free(PAT);
-	free(PCT);
-	free(PAGE);
-
-	//free(PHD);        //不明白为什么会卡死？？ 不需要申请空间，内部地址包含在page，导致重复free 
-	if ((fclose(fp)) != 0)
-	{
-		printf("%d 关闭失败：ShowTable()\n", PCT->ID);
-		exit(1);
-	}
+    //先读取数据库状态文件和现有表格列表
+    read_my_sql();
+    read_all_table();
+    //依次读取每张表格的数据
+    for (int i = 0; i < table_num; i++)
+    {
+        read_table_data(i, all_table[i].file_name);
+    }
+    //打印所有表格信息
+    cout << "   Total table number:" << table_num << endl;
+    for (int i = 0; i < table_num; i++)
+    {
+        cout << "      " << all_table[i].table_name << ":";
+        cout << "（" << all_table[i].col_num << "，" << all_table[i].row_num << "）";
+        if (all_table[i].col_num == 0)
+            cout << "[ ]" << endl;
+        else
+        {
+            cout << "[" << all_table[i].column[0];
+            for (int j = 1; j < all_table[i].col_num; j++)
+                cout << "，" << all_table[i].column[j];
+            cout << "]" << endl;
+        }
+    }
 }
 
+//向表格中插入数据
+void Insert_table_data(char ins[])
+{
+    //先读取数据库状态文件和现有表格列表
+    read_my_sql();
+    read_all_table();
+
+    //解析指令获取表名
+    string tablename;
+    int i = 12; //移动到指令中name的第一位
+    while (ins[i] != ' ')
+    {
+        tablename += ins[i];
+        i++;
+    }
+    all_table[table_num].table_name = tablename;
+
+    //根据表名打开对应文件，读取表格数据
+    int index;
+    string filename;
+    bool flag = 1;
+    for (int j = 0; j < my_sql_num; j++)
+    {
+        if (my_sql[j].table_name == tablename)
+        {
+            //找到了对应的表格
+            index = my_sql[j].index;
+            filename = my_sql[j].file_name;
+            read_table_data(index, filename);
+            flag = 0;
+            break;
+        }
+    }
+    if (flag == 1) //没找到
+    {
+        cout << "Not found TABLE " << tablename << " !" << endl;
+        return;
+    }
+
+    i += 1;
+    //第一类插入语句
+    if (ins[i] == 'V')
+    {
+        i += 8; //i移动到value[i]的第一位
+        int k = 0;
+        string col_value[50];
+        int num = 0;
+        col = 0, row = all_table[index].row_num;
+        while (true)
+        {
+            col_value[num] += ins[i + k];
+            k++;
+            if (ins[i + k] == ',' || ins[i + k] == '，')
+            {
+                //把每列的值给到对应表格的值数组中，对应列数+1
+                table_data[row][col] = col_value[num];
+                num++; col++;
+                //移动至下一个值
+                i = i + k + 1;
+                k = 0;
+            }
+            else if (ins[i + k] == ')' || ins[i + k] == '）')
+            {
+                //把每列的值给到对应表格的值数组中，对应列数+1
+                table_data[row][col] = col_value[num];
+                num++; col++;
+                i = i + k + 1;
+                break;
+            }
+        }
+        cout << "INSERT SUCCESS !" << endl;
+        all_table[index].row_num++;
+        printf_table(index);
+
+        //修改表格文件
+        write_table_data(index, filename);
+    }
+
+    //第二类插入语句
+    else if (ins[i] == '(')
+    {
+        //获取给定列名称和添加的值
+        i += 1; //i移动到column[i]的第一位
+        int k = 0;
+        string cols[50]; //暂存column[i]的值
+        int num = 0; //给定值的个数
+        while (true)
+        {
+            cols[num] += ins[i + k];
+            k++;
+            if (ins[i + k] == ',' || ins[i + k] == '，')
+            {
+                num++;
+                //移动至下一个值
+                i = i + k + 1;
+                k = 0;
+            }
+            else if (ins[i + k] == ')' || ins[i + k] == '）')
+            {
+                num++;
+                i = i + k + 1;
+                break;
+            }
+        }
+
+        i += 9; //i移动到value[i]的第一位
+        k = 0;
+        string value[50]; //暂存value[i]的值
+        num = 0; //给定值的个数
+        while (true)
+        {
+            string col_value;
+            value[num] += ins[i + k];
+            k++;
+            if (ins[i + k] == ',' || ins[i + k] == '，')
+            {
+                num++;
+                //移动至下一个值
+                i = i + k + 1;
+                k = 0;
+            }
+            else if (ins[i + k] == ')' || ins[i + k] == '）')
+            {
+                num++;
+                i = i + k + 1;
+                break;
+            }
+        }
+
+        col = 0, row = all_table[index].row_num;
+        for (int m = 0; m < all_table[index].col_num; m++)
+        {
+            bool tag = 1; //表示是否为缺省
+            for (int n = 0; n < num; n++)
+            {
+                if (all_table[index].column[m] == cols[n])
+                {
+                    table_data[row][m] = value[n];
+                    tag = 0;
+                    break;
+                }
+            }
+            if (tag == 1)
+                table_data[row][m] = "空"; //缺省值默认为空
+        }
+
+        cout << "INSERT SUCCESS !" << endl;
+        all_table[index].row_num++;
+        printf_table(index);
+
+        //修改表格文件
+        write_table_data(index, filename);
+    }
+
+    else
+    {
+        cout << "Error instruction!" << endl;
+    }
+}
+
+//删除表格数据
+void Delete_table_data(char ins[])
+{
+    //先读取数据库状态文件和现有表格列表
+    read_my_sql();
+    read_all_table();
+
+    //第一类删除语句
+    if (ins[7] == 'F')
+    {
+        //解析指令获取表名
+        string tablename;
+        int i = 12; //移动到指令中name的第一位
+        while (ins[i] != ' ')
+        {
+            tablename += ins[i];
+            i++;
+        }
+        all_table[table_num].table_name = tablename;
+
+        //读取表格数据 
+        int index;
+        string filename;
+        bool flag = 1;
+        for (int j = 0; j < my_sql_num; j++)
+        {
+            if (my_sql[j].table_name == tablename)
+            {
+                //找到了对应的表格
+                index = my_sql[j].index;
+                filename = my_sql[j].file_name;
+                read_table_data(index, filename);
+                flag = 0;
+                break;
+            }
+        }
+
+        if (flag == 1) //没找到
+        {
+            cout << "Not found TABLE " << tablename << " !" << endl;
+            return;
+        }
+
+        i += 7; //i移动到待删除的column第一位
+        string column;
+        while (ins[i] != ' ')
+        {
+            column += ins[i];
+            i++;
+        }
+
+        i += 3; //i移动到待删除的value第一位
+        string value;
+        while (ins[i] != '\0')
+        {
+            value += ins[i];
+            i++;
+        }
+
+        col = all_table[index].col_num, row = all_table[index].row_num;
+
+        //先找到删除的列的下标
+        int column_index = -1;
+        for (int k = 0; k < col; k++)
+        {
+            if (all_table[index].column[k] == column)
+            {
+                column_index = k;
+                break;
+            }
+        }
+        if (column_index == -1)
+        {
+            cout << "Error instruction!" << endl;
+            return;
+        }
+
+        bool tag = 1;
+        //再逐行搜索满足条件的记录
+        for (int k = 0; k < row; k++)
+        {
+            if (table_data[k][column_index] == value)
+            {
+                tag = 0;
+                //找到待删行，进行数据迁移
+                for (int m = k; m < row - 1; m++)
+                {
+                    for (int n = 0; n < col; n++)
+                    {
+                        table_data[m][n] = table_data[m + 1][n];
+                    }
+                }
+                break;
+            }
+        }
+        if (tag == 1)
+        {
+            cout << "Error instruction!" << endl;
+            return;
+        }
+
+        else
+        {
+            all_table[index].row_num--;
+
+            cout << "DELETE SUCCESS !" << endl;
+            printf_table(index);
+
+            //修改表格文件
+            write_table_data(index, filename);
+        }
+    }
+
+    //第二类删除语句
+    else if (ins[7] == '*' && ins[9] == 'F')
+    {
+        //解析指令获取表名
+        string tablename;
+        int i = 14; //移动到指令中name的第一位
+        while (ins[i] != '\0')
+        {
+            tablename += ins[i];
+            i++;
+        }
+        all_table[table_num].table_name = tablename;
+
+        //读取表格数据 
+        int index;
+        string filename;
+        bool flag = 1;
+        for (int j = 0; j < my_sql_num; j++)
+        {
+            if (my_sql[j].table_name == tablename)
+            {
+                //找到了对应的表格
+                index = my_sql[j].index;
+                filename = my_sql[j].file_name;
+                read_table_data(index, filename);
+                flag = 0;
+                break;
+            }
+        }
+        if (flag == 1) //没找到
+        {
+            cout << "Not found TABLE " << tablename << " !" << endl;
+            return;
+        }
+
+        all_table[index].row_num = 0; //删除所有行
+        cout << "DELETE SUCCESS !" << endl;
+        printf_table(index);
+
+        //修改表格文件
+        write_table_data(index, filename);
+    }
+
+    else
+    {
+        cout << "Error instruction!" << endl;
+    }
+}
+
+//修改表格数据
+void Updata_table_data(char ins[])
+{
+    //先读取数据库状态文件和现有表格列表
+    read_my_sql();
+    read_all_table();
+
+    //解析指令获取表名
+    string tablename;
+    int i = 7; //移动到指令中name的第一位
+    while (ins[i] != ' ')
+    {
+        tablename += ins[i];
+        i++;
+    }
+    all_table[table_num].table_name = tablename;
+
+    //根据表名打开对应文件，读取表格数据
+    int index;
+    string filename;
+    bool flag = 1;
+    for (int j = 0; j < my_sql_num; j++)
+    {
+        if (my_sql[j].table_name == tablename)
+        {
+            //找到了对应的表格
+            index = my_sql[j].index;
+            filename = my_sql[j].file_name;
+            read_table_data(index, filename);
+            flag = 0;
+            break;
+        }
+    }
+    if (flag == 1) //没找到
+    {
+        cout << "Not found TABLE " << tablename << " !" << endl;
+        return;
+    }
+
+    i += 5; //移动到column i第一位
+    int k = 0;
+    int tag = 0;
+    string s[50];
+    string column[50], value[50];
+    int num = 0;
+    while (true)
+    {
+        while (ins[i + k] != ',' && ins[i + k] != '\0' && ins[i + k] != 'W')
+        {
+            s[num] += ins[i + k];
+            k++;
+        }
+
+        if (ins[i + k] == ',')
+        {
+            num++;
+            i = i + k + 2;
+            k = 0;
+        }
+
+        else if (ins[i + k] == '\0')
+        {
+            tag = 1; //第一类更新语句
+            num++;
+            break;
+        }
+
+        else if (ins[i + k] == 'W')
+        {
+            tag = 2; //第二类更新语句
+            num++;
+            //最后一句多了一个空格，删去之
+            string temp = s[num - 1].substr(0, s[num - 1].size() - 1);
+            s[num - 1] = temp;
+            i = i + k + 6; //i 移动到column首位
+            break;
+        }
+    }
+
+    //逐句再次解析
+    for (int j = 0; j < num; j++)
+    {
+        int cur = 0;
+        while (s[j][cur] != ' ')
+            cur++;
+        column[j] = s[j].substr(0, cur);
+        cur += 3;
+        value[j] = s[j].substr(cur, s[j].size());
+    }
+
+    if (tag == 1)
+    {
+        //对表格每一列进行遍历，搜索column[]数组判断是否需要更改
+        for (int j = 0; j < all_table[index].col_num; j++)
+        {
+            for (int n = 0; n < num; n++)
+            {
+                if (all_table[index].column[j] == column[n])
+                {
+                    //更改这一列每一行的值
+                    for (int m = 0; m < all_table[index].row_num; m++)
+                    {
+                        //m是表格的某一行，j是表格的某一列，n是对应要修改的值
+                        table_data[m][j] = value[n];
+                    }
+                    break;
+                }
+            }
+        }
+        cout << "UPDATE SUCCESS !" << endl;
+        printf_table(index);
+
+        //修改表格文件
+        write_table_data(index, filename);
+    }
+
+    else if (tag == 2)
+    {
+        //记录限制条件 column = value
+        string clmn, val;
+        while (ins[i] != ' ')
+        {
+            clmn += ins[i];
+            i++;
+        }
+        i += 3;
+        while (ins[i] != '\0')
+        {
+            val += ins[i];
+            i++;
+        }
+
+        //找到对应的列的下标
+        int column_index = -1;
+        for (k = 0; k < all_table[index].col_num; k++)
+        {
+            if (all_table[index].column[k] == clmn)
+            {
+                column_index = k;
+                break;
+            }
+        }
+        if (column_index == -1)
+        {
+            cout << "Error instruction!" << endl;
+            return;
+        }
+
+        //对表格每一列进行遍历，搜索column[]数组判断是否需要更改
+        for (int j = 0; j < all_table[index].col_num; j++)
+        {
+            for (int n = 0; n < num; n++)
+            {
+                if (all_table[index].column[j] == column[n])
+                {
+                    //只更改这一列满足限制条件的行的值
+                    for (int m = 0; m < all_table[index].row_num; m++)
+                    {
+                        //判断是否满足条件
+                        if (table_data[m][column_index] == val)
+                        {
+                            //m是表格的某一行，j是表格的某一列，n是对应要修改的值
+                            table_data[m][j] = value[n];
+                        }
+                    }
+                    break;
+                }
+            }
+        }
+        cout << "UPDATE SUCCESS !" << endl;
+        printf_table(index);
+
+        //修改表格文件
+        write_table_data(index, filename);
+    }
+
+    else
+    {
+        cout << "Error instruction!" << endl;
+    }
+}
+
+//选择表格数据并展示
+void Selete_table_data(char ins[])
+{
+    //先读取数据库状态文件和现有表格列表
+    read_my_sql();
+    read_all_table();
+
+    if (ins[7] == '*')
+    {
+        //解析指令获取表名
+        string tablename;
+        int i = 14; //移动到指令中name的第一位
+        while (ins[i] != '\0' && ins[i] != ' ')
+        {
+            tablename += ins[i];
+            i++;
+        }
+
+        //根据表名打开对应文件，读取表格数据
+        int index;
+        string filename;
+        bool flag = 1;
+        for (int j = 0; j < my_sql_num; j++)
+        {
+            if (my_sql[j].table_name == tablename)
+            {
+                //找到了对应的表格
+                index = my_sql[j].index;
+                filename = my_sql[j].file_name;
+                read_table_data(index, filename);
+                flag = 0;
+                break;
+            }
+        }
+        if (flag == 1) //没找到
+        {
+            cout << "Not found TABLE " << tablename << " !" << endl;
+            return;
+        }
+
+        //从TABLE name里选择所有列展示，即展示整个TABLE
+        if (ins[i] == '\0')
+        {
+            printf_table(index);
+        }
+
+        //对返回的查询结果按某些列进行排序展示
+        else if (ins[i] == ' ' && ins[i + 1] == 'O')
+        {
+            i += 10; //移动到 column i 第一位
+            string column[50];
+            int num = 0;
+            int k = 0;
+            while (true)
+            {
+                while (ins[i + k] != ',' && ins[i + k] != ' ')
+                {
+                    column[num] += ins[i + k];
+                    k++;
+                }
+
+                if (ins[i + k] == ',')
+                {
+                    num++;
+                    i = i + k + 1;
+                    k = 0;
+                }
+
+                else if (ins[i + k] == ' ')
+                {
+                    num++;
+                    i = i + k + 1; //i 移动到ASC|DESC首位
+                    break;
+                }
+            }
+
+            //找到对应的列的下标
+            int column_index = -1;
+            for (k = 0; k < all_table[index].col_num; k++)
+            {
+                //支持按某一列的值排序
+                if (all_table[index].column[k] == column[0])
+                {
+                    column_index = k;
+                    break;
+                }
+            }
+            if (column_index == -1)
+            {
+                cout << "Error instruction!" << endl;
+                return;
+            }
+
+            if (ins[i] == 'A') //升序
+            {
+                for (int m = 0; m < all_table[index].row_num - 1; m++)
+                {
+                    for (int n = 0; n < all_table[index].row_num - m - 1; n++)
+                    {
+                        if (table_data[n][column_index] > table_data[n + 1][column_index])
+                        {
+                            //交换两行元素
+                            for (int tt = 0; tt < all_table[index].col_num; tt++)
+                            {
+                                string temp = table_data[n][tt];
+                                table_data[n][tt] = table_data[n + 1][tt];
+                                table_data[n + 1][tt] = temp;
+                            }
+                        }
+                    }
+                }
+            }
+
+            else if (ins[i] == 'D') //降序
+            {
+                for (int m = 0; m < all_table[index].row_num - 1; m++)
+                {
+                    for (int n = 0; n < all_table[index].row_num - m - 1; n++)
+                    {
+                        if (table_data[n][column_index] < table_data[n + 1][column_index])
+                        {
+                            //交换两行元素
+                            for (int tt = 0; tt < all_table[index].col_num; tt++)
+                            {
+                                string temp = table_data[n][tt];
+                                table_data[n][tt] = table_data[n + 1][tt];
+                                table_data[n + 1][tt] = temp;
+                            }
+                        }
+                    }
+                }
+            }
+
+            else
+            {
+                cout << "Error instruction!" << endl;
+                return;
+            }
+
+            //打印
+            //打印表头
+            cout << "----------------------------------------" << endl;
+            cout << "ID ";
+            for (int j = 0; j < all_table[index].col_num; j++)
+            {
+                cout << all_table[index].column[j] << " ";
+            }
+            cout << endl;
+            cout << "----------------------------------------" << endl;
+
+            //打印数据
+            for (int m = 0; m < all_table[index].row_num; m++)
+            {
+                cout << m + 1 << " ";
+                for (int n = 0; n < all_table[index].col_num; n++)
+                {
+                    cout << table_data[m][n] << " ";
+                }
+                cout << endl;
+                cout << "----------------------------------------" << endl;
+            }
+        }
+
+        else if (ins[i] == ' ' && ins[i + 1] == 'W')
+        {
+            i += 7; //i 移动到column第一位
+            //记录限制条件 column = value
+            string clmn, val;
+            while (ins[i] != ' ')
+            {
+                clmn += ins[i];
+                i++;
+            }
+            i += 1;
+
+            // column = value
+            if (ins[i] == '=')
+            {
+                i += 2;
+                while (ins[i] != '\0' && ins[i] != ' ')
+                {
+                    val += ins[i];
+                    i++;
+                }
+
+                //找到对应的列的下标
+                int column_index = -1;
+                for (int k = 0; k < all_table[index].col_num; k++)
+                {
+                    if (all_table[index].column[k] == clmn)
+                    {
+                        column_index = k;
+                        break;
+                    }
+                }
+                if (column_index == -1)
+                {
+                    cout << "Error instruction!" << endl;
+                    return;
+                }
+
+                if (ins[i] == '\0')
+                {
+                    //打印
+                    //打印表头
+                    cout << "----------------------------------------" << endl;
+                    cout << "ID ";
+                    for (int j = 0; j < all_table[index].col_num; j++)
+                    {
+                        cout << all_table[index].column[j] << " ";
+                    }
+                    cout << endl;
+                    cout << "----------------------------------------" << endl;
+
+                    //打印数据
+                    for (int m = 0; m < all_table[index].row_num; m++)
+                    {
+                        if (table_data[m][column_index] == val)
+                        {
+                            cout << m + 1 << " ";
+                            for (int n = 0; n < all_table[index].col_num; n++)
+                            {
+                                cout << table_data[m][n] << " ";
+                            }
+                            cout << endl;
+                            cout << "----------------------------------------" << endl;
+                        }
+                    }
+                }
+
+                else
+                {
+                    i += 4; //移动到新表格文件名第一位
+                    string new_filename;
+                    while (ins[i] != '\0')
+                    {
+                        new_filename += ins[i];
+                        i++;
+                    }
+
+                    //打印
+                    //打印表头
+                    cout << "----------------------------------------" << endl;
+                    cout << "ID ";
+                    for (int j = 0; j < all_table[index].col_num; j++)
+                    {
+                        cout << all_table[index].column[j] << " ";
+                    }
+                    cout << endl;
+                    cout << "----------------------------------------" << endl;
+
+                    //打印数据
+                    for (int m = 0; m < all_table[index].row_num; m++)
+                    {
+                        if (table_data[m][column_index] == val)
+                        {
+                            cout << m + 1 << " ";
+                            for (int n = 0; n < all_table[index].col_num; n++)
+                            {
+                                cout << table_data[m][n] << " ";
+                            }
+                            cout << endl;
+                            cout << "----------------------------------------" << endl;
+                        }
+                    }
+
+                    //创建新表写入文件
+                    ofstream out_file(new_filename, ios::out);
+                    //写入表头
+                    for (int j = 0; j < all_table[index].col_num; j++)
+                    {
+                        out_file << all_table[index].column[j] << " ";
+                    }
+                    out_file << endl;
+
+                    //写入数据
+                    for (int m = 0; m < all_table[index].row_num; m++)
+                    {
+                        if (table_data[m][column_index] == val)
+                        {
+                            for (int n = 0; n < all_table[index].col_num; n++)
+                            {
+                                out_file << table_data[m][n] << " ";
+                            }
+                            out_file << endl;
+                        }
+                    }
+                    out_file.close();
+
+                    //修改数据库状态
+                    my_sql[my_sql_num].table_name = "None";
+                    my_sql[my_sql_num].file_name = new_filename;
+                    my_sql[my_sql_num].index = table_num;
+                    my_sql_num++;
+                    write_my_sql(); //更新数据库状态文件
+
+                }
+            }
+
+            // column > value
+            else if (ins[i] == '>')
+            {
+                i += 2;
+                while (ins[i] != '\0')
+                {
+                    val += ins[i];
+                    i++;
+                }
+
+                //找到对应的列的下标
+                int column_index = -1;
+                for (int k = 0; k < all_table[index].col_num; k++)
+                {
+                    if (all_table[index].column[k] == clmn)
+                    {
+                        column_index = k;
+                        break;
+                    }
+                }
+                if (column_index == -1)
+                {
+                    cout << "Error instruction!" << endl;
+                    return;
+                }
+
+                //打印
+                //打印表头
+                cout << "----------------------------------------" << endl;
+                cout << "ID ";
+                for (int j = 0; j < all_table[index].col_num; j++)
+                {
+                    cout << all_table[index].column[j] << " ";
+                }
+                cout << endl;
+                cout << "----------------------------------------" << endl;
+
+                //打印数据
+                for (int m = 0; m < all_table[index].row_num; m++)
+                {
+                    if (table_data[m][column_index] > val)
+                    {
+                        cout << m + 1 << " ";
+                        for (int n = 0; n < all_table[index].col_num; n++)
+                        {
+                            cout << table_data[m][n] << " ";
+                        }
+                        cout << endl;
+                        cout << "----------------------------------------" << endl;
+                    }
+                }
+            }
+
+            // column < value ，其中value=max(学号)
+            else if (ins[i] == '<')
+            {
+                i += 2;
+
+                //找到对应的列的下标
+                int column_index = -1;
+                for (int k = 0; k < all_table[index].col_num; k++)
+                {
+                    if (all_table[index].column[k] == clmn)
+                    {
+                        column_index = k;
+                        break;
+                    }
+                }
+                if (column_index == -1)
+                {
+                    cout << "Error instruction!" << endl;
+                    return;
+                }
+
+                //找学号最大值
+                string max = table_data[0][column_index];
+                for (int j = 0; j < all_table[index].row_num; j++)
+                {
+                    if (table_data[j][column_index] > max)
+                    {
+                        max = table_data[j][column_index];
+                    }
+                }
+
+                //打印
+                //打印表头
+                cout << "----------------------------------------" << endl;
+                cout << "ID ";
+                for (int j = 0; j < all_table[index].col_num; j++)
+                {
+                    cout << all_table[index].column[j] << " ";
+                }
+                cout << endl;
+                cout << "----------------------------------------" << endl;
+
+                //打印数据
+                for (int m = 0; m < all_table[index].row_num; m++)
+                {
+                    if (table_data[m][column_index] < max)
+                    {
+                        cout << m + 1 << " ";
+                        for (int n = 0; n < all_table[index].col_num; n++)
+                        {
+                            cout << table_data[m][n] << " ";
+                        }
+                        cout << endl;
+                        cout << "----------------------------------------" << endl;
+                    }
+                }
+            }
+
+            else
+            {
+                cout << "Error instruction!" << endl;
+                return;
+            }
+        }
+
+        else
+        {
+            cout << "Error instruction!" << endl;
+        }
+    }
+
+    else if (ins[7] == 'D')
+    {
+        string column[50];
+        int num = 0;
+        int i = 16; //移动到 column i 第一位
+        int k = 0;
+        while (true)
+        {
+            while (ins[i + k] != ',' && ins[i + k] != ' ')
+            {
+                column[num] += ins[i + k];
+                k++;
+            }
+
+            if (ins[i + k] == ',')
+            {
+                num++;
+                i = i + k + 1;
+                k = 0;
+            }
+
+            else if (ins[i + k] == ' ')
+            {
+                num++;
+                i = i + k + 6; //i 移动到name首位
+                break;
+            }
+        }
+
+        //解析表名
+        string tablename;
+        while (ins[i] != '\0' && ins[i] != ' ')
+        {
+            tablename += ins[i];
+            i++;
+        }
+
+        //根据表名打开对应文件，读取表格数据
+        int index;
+        string filename;
+        bool tag = 1;
+        for (int j = 0; j < my_sql_num; j++)
+        {
+            if (my_sql[j].table_name == tablename)
+            {
+                //找到了对应的表格
+                index = my_sql[j].index;
+                filename = my_sql[j].file_name;
+                read_table_data(index, filename);
+                tag = 0;
+                break;
+            }
+        }
+        if (tag == 1) //没找到
+        {
+            cout << "Not found TABLE " << tablename << " !" << endl;
+            return;
+        }
+
+        bool flag[50]; //给每一列做标记
+        for (int j = 0; j < all_table[index].col_num; j++)
+        {
+            flag[j] = 0;
+        }
+        for (int j = 0; j < all_table[index].col_num; j++)
+        {
+            for (k = 0; k < num; k++)
+            {
+                if (all_table[index].column[j] == column[k])
+                {
+                    flag[j] = 1;
+                    break;
+                }
+            }
+        }
+
+        //打印表头
+        cout << "----------------------------------------" << endl;
+        cout << "ID ";
+        for (int j = 0; j < all_table[index].col_num; j++)
+        {
+            if (flag[j] == 1)
+                cout << all_table[index].column[j] << " ";
+        }
+        cout << endl;
+        cout << "----------------------------------------" << endl;
+
+        //打印数据
+        for (int m = 0; m < all_table[index].row_num; m++)
+        {
+            bool print = 1; //判断要不要打印 
+            for (int n = 0; n < all_table[index].col_num; n++)
+            {
+                if (flag[n] == 1)
+                {
+                    for (int a = 0; a < m; a++)
+                    {
+                        if (table_data[a][n] == table_data[m][n])
+                        {
+                            print = 0;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if (print == 1)
+            {
+                cout << m + 1 << " ";
+                for (int n = 0; n < all_table[index].col_num; n++)
+                {
+                    if (flag[n] == 1)
+                        cout << table_data[m][n] << " ";
+                }
+                cout << endl;
+                cout << "----------------------------------------" << endl;
+            }
+        }
+
+    }
+
+    else if (ins[7] == 'M')
+    {
+        int i = 11;
+        string column;
+        while (ins[i] != ')')
+        {
+            column += ins[i];
+            i++;
+        }
+
+        //解析指令获取表名
+        i += 7;
+        string tablename;
+        while (ins[i] != '\0')
+        {
+            tablename += ins[i];
+            i++;
+        }
+
+        //根据表名打开对应文件，读取表格数据
+        int index;
+        string filename;
+        bool flag = 1;
+        for (int j = 0; j < my_sql_num; j++)
+        {
+            if (my_sql[j].table_name == tablename)
+            {
+                //找到了对应的表格
+                index = my_sql[j].index;
+                filename = my_sql[j].file_name;
+                read_table_data(index, filename);
+                flag = 0;
+                break;
+            }
+        }
+        if (flag == 1) //没找到
+        {
+            cout << "Not found TABLE " << tablename << " !" << endl;
+            return;
+        }
+
+
+        //找到对应的列的下标
+        int column_index = -1;
+        for (int k = 0; k < all_table[index].col_num; k++)
+        {
+            if (all_table[index].column[k] == column)
+            {
+                column_index = k;
+                break;
+            }
+        }
+        if (column_index == -1)
+        {
+            cout << "Error instruction!" << endl;
+            return;
+        }
+
+        //找最大值
+        int maxline = 0;
+        string max = table_data[0][column_index];
+        for (int j = 0; j < all_table[index].row_num; j++)
+        {
+            if (table_data[j][column_index] > max)
+            {
+                max = table_data[j][column_index];
+                maxline = j;
+            }
+        }
+
+        //打印
+        //打印表头
+        cout << "----------------------------------------" << endl;
+        cout << "ID ";
+        for (int j = 0; j < all_table[index].col_num; j++)
+        {
+            cout << all_table[index].column[j] << " ";
+        }
+        cout << endl;
+        cout << "----------------------------------------" << endl;
+
+        //打印数据
+        cout << maxline + 1 << " ";
+        for (int n = 0; n < all_table[index].col_num; n++)
+        {
+            cout << table_data[maxline][n] << " ";
+        }
+        cout << endl;
+        cout << "----------------------------------------" << endl;
+
+    }
+
+    else
+    {
+        string column[50];
+        int num = 0;
+        int i = 7; //移动到 column i 第一位
+        int k = 0;
+        while (true)
+        {
+            while (ins[i + k] != ',' && ins[i + k] != ' ')
+            {
+                column[num] += ins[i + k];
+                k++;
+            }
+
+            if (ins[i + k] == ',')
+            {
+                num++;
+                i = i + k + 1;
+                k = 0;
+            }
+
+            else if (ins[i + k] == ' ')
+            {
+                num++;
+                i = i + k + 6; //i 移动到name首位
+                break;
+            }
+        }
+
+        //解析表名
+        string tablename;
+        while (ins[i] != '\0' && ins[i] != ' ')
+        {
+            tablename += ins[i];
+            i++;
+        }
+        all_table[table_num].table_name = tablename;
+
+        //根据表名打开对应文件，读取表格数据
+        int index;
+        string filename;
+        bool tag = 1;
+        for (int j = 0; j < my_sql_num; j++)
+        {
+            if (my_sql[j].table_name == tablename)
+            {
+                //找到了对应的表格
+                index = my_sql[j].index;
+                filename = my_sql[j].file_name;
+                read_table_data(index, filename);
+                tag = 0;
+                break;
+            }
+        }
+        if (tag == 1) //没找到
+        {
+            cout << "Not found TABLE " << tablename << " !" << endl;
+            return;
+        }
+
+        bool flag[50]; //给每一列做标记
+        for (int j = 0; j < all_table[index].col_num; j++)
+        {
+            flag[j] = 0;
+        }
+        for (int j = 0; j < all_table[index].col_num; j++)
+        {
+            for (k = 0; k < num; k++)
+            {
+                if (all_table[index].column[j] == column[k])
+                {
+                    flag[j] = 1;
+                    break;
+                }
+            }
+        }
+
+        //从TABLE name里选择若干列展示
+        if (ins[i] == '\0')
+        {
+            //打印表头
+            cout << "----------------------------------------" << endl;
+            cout << "ID ";
+            for (int j = 0; j < all_table[index].col_num; j++)
+            {
+                if (flag[j] == 1)
+                    cout << all_table[index].column[j] << " ";
+            }
+            cout << endl;
+            cout << "----------------------------------------" << endl;
+
+            //打印数据
+            for (int m = 0; m < all_table[index].row_num; m++)
+            {
+                cout << m + 1 << " ";
+                for (int n = 0; n < all_table[index].col_num; n++)
+                {
+                    if (flag[n] == 1)
+                        cout << table_data[m][n] << " ";
+                }
+                cout << endl;
+                cout << "----------------------------------------" << endl;
+            }
+        }
+
+        //从TABLE name里选择若干列展示
+        else if (ins[i] == ' ' && ins[i + 1] == 'W')
+        {
+            i += 7; //移动到column首位
+            //记录限制条件 column = value
+            string clmn, val;
+            while (ins[i] != ' ')
+            {
+                clmn += ins[i];
+                i++;
+            }
+            i += 3;
+            while (ins[i] != '\0')
+            {
+                val += ins[i];
+                i++;
+            }
+
+            //找到对应的列的下标
+            int column_index = -1;
+            for (k = 0; k < all_table[index].col_num; k++)
+            {
+                if (all_table[index].column[k] == clmn)
+                {
+                    column_index = k;
+                    break;
+                }
+            }
+            if (column_index == -1)
+            {
+                cout << "Error instruction!" << endl;
+                return;
+            }
+
+            //打印表头
+            cout << "----------------------------------------" << endl;
+            cout << "ID ";
+            for (int j = 0; j < all_table[index].col_num; j++)
+            {
+                if (flag[j] == 1)
+                    cout << all_table[index].column[j] << " ";
+            }
+            cout << endl;
+            cout << "----------------------------------------" << endl;
+
+            //打印数据
+            for (int m = 0; m < all_table[index].row_num; m++)
+            {
+                if (table_data[m][column_index] == val)
+                {
+                    cout << m + 1 << " ";
+                    for (int n = 0; n < all_table[index].col_num; n++)
+                    {
+                        if (flag[n] == 1)
+                            cout << table_data[m][n] << " ";
+                    }
+                    cout << endl;
+                    cout << "----------------------------------------" << endl;
+                }
+            }
+        }
+
+        else
+        {
+            cout << "Error instruction!" << endl;
+        }
+    }
+}
+
+//打印表格
+void printf_table(int index)
+{
+    cout << "----------------------------------------" << endl;
+    cout << "ID ";
+    for (int i = 0; i < all_table[index].col_num; i++)
+    {
+        cout << all_table[index].column[i] << " ";
+    }
+    cout << endl;
+    cout << "----------------------------------------" << endl;
+    for (int i = 0; i < all_table[index].row_num; i++)
+    {
+        cout << i + 1 << " ";
+        for (int j = 0; j < all_table[index].col_num; j++)
+            cout << table_data[i][j] << " ";
+        cout << endl;
+        cout << "----------------------------------------" << endl;
+    }
+}
+
+//打印所有表格列表
+void printf_table_list()
+{
+    for (int i = 0; i < table_num; i++)
+        cout << all_table[i].table_name << " " << all_table[i].file_name << endl;
+}
+
+//判断是否为空行（即m是否为字母）
+bool is_not_endl(char m)
+{
+    if (((m >= 'a') && (m <= 'z')) || ((m >= 'A') && (m <= 'Z')))
+        return true;
+    return false;
+}
