@@ -118,17 +118,17 @@ bool is_not_endl(char m);
 */
 int main()
 {
-    cout << "\033[33m-----\033[32mWelcome \033[35mto \033[36mmySQL!\033[33m-----\033[0m" << endl;
+    cout << "\033[33m----->\033[32mWelcome \033[35mto \033[36mmy \033[31mhand \033[32mSQL!\033[33m<-----\033[0m" << endl;
     while (true)
     {
-        cout << "(mysql)==>";
+        cout << "hand_sql)==>";
         char ins[100]; //用来接受指令
         cin.getline(ins, 100);
 
         //Quit 退出数据库
         if (ins[0] == 'q' && ins[1] == 'u' && ins[2] == 'i' && ins[3] == 't')
         {
-            cout << "\033[33m-----\033[32mQuit \033[36mmySQL!\033[33m-----\033[0m" << endl;
+            cout << "\033[33m-----\033[32mQuit \033[31mhand \033[36mSQL!\033[33m-----\033[0m" << endl;
             break;
         }
 
@@ -177,7 +177,7 @@ int main()
         //ERROR     指令错误
         else
         {
-            cout << "Error instruction!" << endl;
+            cout << "\033[31mError instruction!\033[0m" << endl;
         }
     }
 
@@ -526,6 +526,7 @@ void Table_list()
     }
     //打印所有表格信息
     cout << "   Total table number:" << table_num << endl;
+	cout << " 表格名称 ：（列数，行数）[属性列表]" << endl;
     for (int i = 0; i < table_num; i++)
     {
         cout << "      " << all_table[i].table_name << ":";
