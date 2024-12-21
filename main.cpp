@@ -29,7 +29,7 @@ int main() {
     for (int i = 0; i < sizeof(commands) / sizeof(commands[0]); ++i) {
         strcpy_s(ins, sizeof(ins), commands[i]);
 
-        cout << "Executing: " << ins << endl;
+        cout << "（sql)==>" << ins << endl;
 
         // CREATE TABLE 创建表格功能
         if (strncmp(ins, "CREATE", 6) == 0) {
@@ -63,6 +63,7 @@ int main() {
         else {
             cout << "\033[31mError instruction!\033[0m" << endl;
         }
+		cout << endl << endl;
     }
 
     cout << "\033[33m-----\033[32mQuit \033[31mhand \033[36mSQL!\033[33m-----\033[0m" << endl;
