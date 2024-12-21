@@ -1,217 +1,34 @@
-﻿#include<iostream>
-#include<string>
-#include<fstream>
-using namespace std;
+#include "HandwrittenDatabases.h"
 
-/*一些测试指令
-* TABLE LIST
-* CREATE TABLE Student FROM student.txt
-* CREATE TABLE CS_Student FROM CS.txt
-* CREATE TABLE Student (学号,姓名,专业) TO student.txt
-* CREATE TBALE Lecture (课程编号,课程名称,任课老师) TO lecture.txt
-* DROP TABLE Lecture
-*
-* INSERT INTO Student VALUES (170000001,张三,计算机科学与技术)
-* INSERT INTO Student VALUES (170000002,李四,金融系)
-* INSERT INTO Student (学号,姓名) VALUES (170000003,王二)
-* INSERT INTO Student (学号,姓名,专业) VALUES (170000004,刘五,微电子)
-*
-* DELETE FROM Student WHERE 姓名 = 张三
-* DELETE * FROM Student
-*
-* UPDATE Student SET 学号 = 170000000, 专业 = 计算机科学与技术
-* UPDATE Student SET 学号 = 170000000, 专业 = 地球科学 WHERE 姓名 = 张三
-*
-* SELECT 学号,姓名 FROM Student
-* SELECT * FROM Student
-* SELECT 专业 FROM Student
-* SELECT DISTINCT 专业 FROM Student
-* SELECT * FROM Student ORDER BY 学号 DESC
-* SELECT 专业 FROM Student WHERE 姓名 = 张三
-* SELECT * FROM Student WHERE 姓名 = 张三
-* SELECT * FROM Student WHERE 专业 = 计算机科学与技术 TO CS.txt
-*
-* SELECT * FROM Student WHERE 学号 > 170000000
-* SELECT MAX(学号) FROM Student
-* SELECT * FROM Student WHERE 学号 < (SELECT MAX(学号) FROM Student)
-*/
-
-/*
-* 这里是数据结构及函数声明~
-*/
-struct SQL //数据库结构体，包括表名和文件名和表格对应序号
-{
-    string table_name;
-    string file_name;
-    int index;
-};
-SQL my_sql[100]; //维护一个数据库状态数组
-int my_sql_num = 0; //当前数据库状态行数
-
-struct TABLE //表格结构体，包括表名，文件名，各列的属性名，行数列数
-{
-    string table_name;
-    string file_name;
-    string column[50];
-    int col_num = 0;
-    int row_num = 0;
-};
-TABLE all_table[100]; //维护一个全体表格数组
-int table_num = 0; //当前数据库表格数量
-
-string table_data[100][100]; //维护一个数据二维数组，用于暂时存储更新的表格数据
-int row = 0, col = 0; //当前表格数据行列数
-
-//读取数据库文件
-void read_my_sql();
-
-//写入数据库文件
-void write_my_sql();
-
-//读取所有表格及其属性
-void read_all_table();
-
-//读取表头
-void read_table(int index, string filename);
-
-//写入表头
-void write_table(int index, string filename);
-
-//读取表格数据
-void read_table_data(int index, string filename);
-
-//写入表格数据
-void write_table_data(int index, string filename);
-
-//根据指令创建表格
-void Create_table(char ins[]);
-
-//根据指令删除表格
-void Drop_table(char ins[]);
-
-//查看所有表格
-void Table_list();
-
-//向表格中插入数据
-void Insert_table_data(char ins[]);
-
-//删除表格数据
-void Delete_table_data(char ins[]);
-
-//修改表格数据
-void Updata_table_data(char ins[]);
-
-//选择表格数据并展示
-void Selete_table_data(char ins[]);
-
-//打印表格数据
-void printf_table(int index);
-
-//打印所有表格列表
-void printf_table_list();
-
-//判断是否为空行（即m是否为字母）
-bool is_not_endl(char m);
-
-/*
-* 这里是主函数~
-*/
-int main()
-{
-    cout << "\033[33m----->\033[32mWelcome \033[35mto \033[36mmy \033[31mhand \033[32mSQL!\033[33m<-----\033[0m" << endl;
-    while (true)
-    {
-        cout << "hand_sql)==>";
-        char ins[100]; //用来接受指令
-        cin.getline(ins, 100);
-
-        //Quit 退出数据库
-        if (ins[0] == 'q' && ins[1] == 'u' && ins[2] == 'i' && ins[3] == 't')
-        {
-            cout << "\033[33m-----\033[32mQuit \033[31mhand \033[36mSQL!\033[33m-----\033[0m" << endl;
-            break;
-        }
-
-        //CREATE TABLE      创建表格功能
-        else if (ins[0] == 'C' && ins[1] == 'R' && ins[2] == 'E' && ins[3] == 'A' && ins[4] == 'T' && ins[5] == 'E')
-        {
-            Create_table(ins);
-        }
-
-        //DROP TABLE        删除表格功能    
-        else if (ins[0] == 'D' && ins[1] == 'R' && ins[2] == 'O' && ins[3] == 'P')
-        {
-            Drop_table(ins);
-        }
-
-        //TABLE LIST        查看所有表格
-        else if ((ins[0] == '0') || (ins[0] == 'T' && ins[1] == 'A' && ins[2] == 'B' && ins[3] == 'L' && ins[4] == 'E'))
-        {
-            Table_list();
-        }
-
-        //INSERT INTO       插入数据
-        else if (ins[0] == 'I' && ins[1] == 'N' && ins[2] == 'S' && ins[3] == 'E' && ins[4] == 'R' && ins[5] == 'T')
-        {
-            Insert_table_data(ins);
-        }
-
-        //DELETE        删除数据
-        else if (ins[0] == 'D' && ins[1] == 'E' && ins[2] == 'L' && ins[3] == 'E' && ins[4] == 'T' && ins[5] == 'E')
-        {
-            Delete_table_data(ins);
-        }
-
-        //UPDATE        更新数据
-        else if (ins[0] == 'U' && ins[1] == 'P' && ins[2] == 'D' && ins[3] == 'A' && ins[4] == 'T' && ins[5] == 'E')
-        {
-            Updata_table_data(ins);
-        }
-
-        //SELECT        选择数据
-        else if (ins[0] == 'S' && ins[1] == 'E' && ins[2] == 'L' && ins[3] == 'E' && ins[4] == 'C' && ins[5] == 'T')
-        {
-            Selete_table_data(ins);
-        }
-
-        //ERROR     指令错误
-        else
-        {
-            cout << "\033[31mError instruction!\033[0m" << endl;
-        }
-    }
-
-    return 0;
+HandwrittenDatabases::HandwrittenDatabases() : row(0), col(0) {
+    readMySQL();
+    readAllTables();
 }
 
-/*
-* 下面是函数的定义~
-*/
+HandwrittenDatabases::~HandwrittenDatabases() {
+    writeMySQL();
+}
 
-//读取数据库状态文件
-void read_my_sql()
-{
+void HandwrittenDatabases::readMySQL() {
     my_sql_num = 0; //读入新状态前先将原状态归零
     const string my_sql_filename = "my_sql.txt"; //设置数据库状态文件名
 
     //打开文件，若文件不存在，则创建文件
-    ifstream in_file(my_sql_filename, ios::_Noreplace);
+    ifstream in_file(my_sql_filename, ios::in);
 
     while (in_file.peek() != EOF)
     {
         in_file >> my_sql[my_sql_num].table_name;
         in_file >> my_sql[my_sql_num].file_name;
         in_file >> my_sql[my_sql_num].index;
-        if (is_not_endl(my_sql[my_sql_num].table_name[0]) == 1)
+        if (isNotEndl(my_sql[my_sql_num].table_name[0]) == 1)
             my_sql_num++;
     }
 
     in_file.close();
 }
 
-//写入数据库状态文件
-void write_my_sql()
-{
+void HandwrittenDatabases::writeMySQL() {
     const string my_sql_filename = "my_sql.txt"; //设置数据库状态文件名
     ofstream out_file(my_sql_filename, ios::out);
     for (int i = 0; i < my_sql_num; i++)
@@ -224,9 +41,7 @@ void write_my_sql()
     out_file.close();
 }
 
-//读取所有表格及其属性
-void read_all_table()
-{
+void HandwrittenDatabases::readAllTables() {
     table_num = 0; //表格数归零
 
     for (int i = 0; i < my_sql_num; i++)
@@ -235,19 +50,17 @@ void read_all_table()
         int ind = my_sql[i].index;
         all_table[ind].table_name = my_sql[i].table_name;
         all_table[ind].file_name = my_sql[i].file_name;
-        read_table(ind, my_sql[i].file_name);
-        if (is_not_endl(all_table[ind].file_name[0]) == 1)
+        readTable(ind, my_sql[i].file_name);
+        if (isNotEndl(all_table[ind].file_name[0]) == 1)
             table_num++;
     }
 }
 
-//读取表头
-void read_table(int index, string filename)
-{
+void HandwrittenDatabases::readTable(int index, const string& filename) {
     all_table[index].col_num = 0; //读入表头前先将表格列数归零
 
     //打开文件，若文件不存在，则创建文件
-    ifstream in_file(filename, ios::_Noreplace);
+    ifstream in_file(filename, ios::in);
     string s;
     getline(in_file, s);
     int i = 0;
@@ -274,9 +87,7 @@ void read_table(int index, string filename)
     in_file.close();
 }
 
-//写入表头
-void write_table(int index, string filename)
-{
+void HandwrittenDatabases::writeTable(int index, const string& filename) {
     ofstream out_file(filename, ios::out);
     for (int i = 0; i < all_table[index].col_num; i++)
         out_file << all_table[index].column[i] << " ";
@@ -284,13 +95,11 @@ void write_table(int index, string filename)
     out_file.close();
 }
 
-//读取表格数据
-void read_table_data(int index, string filename)
-{
+void HandwrittenDatabases::readTableData(int index, const string& filename) {
     all_table[index].row_num = 0; //读入表头前先将表格行数归零
 
     //打开文件，若文件不存在，则创建文件
-    ifstream in_file(filename, ios::_Noreplace);
+    ifstream in_file(filename, ios::in);
 
     //先读表头
     string s;
@@ -307,9 +116,7 @@ void read_table_data(int index, string filename)
     in_file.close();
 }
 
-//写入表格数据
-void write_table_data(int index, string filename)
-{
+void HandwrittenDatabases::writeTableData(int index, const string& filename) {
     ofstream out_file(filename, ios::out);
     //写入表头
     for (int i = 0; i < all_table[index].col_num; i++)
@@ -330,12 +137,9 @@ void write_table_data(int index, string filename)
     out_file.close();
 }
 
-//根据指令创建表格，获取表名、文件名、属性名等
-void Create_table(char ins[])
-{
-    //先读取数据库状态文件和现有表格列表
-    read_my_sql();
-    read_all_table();
+void HandwrittenDatabases::createTable(char ins[]) {
+    readMySQL();
+    readAllTables();
 
     //解析指令获取表名，记录到总表格数组中
     string tablename;
@@ -402,14 +206,14 @@ void Create_table(char ins[])
         all_table[table_num].file_name = filename;
 
         //创建表格文件并写入表头
-        write_table(table_num, filename);
+        writeTable(table_num, filename);
 
         //修改数据库状态
         my_sql[my_sql_num].table_name = tablename;
         my_sql[my_sql_num].file_name = filename;
         my_sql[my_sql_num].index = table_num;
         my_sql_num++;
-        write_my_sql(); //更新数据库状态文件
+        writeMySQL(); //更新数据库状态文件
 
         table_num++; //最后，表格数量加一
 
@@ -437,8 +241,8 @@ void Create_table(char ins[])
                 //找到了对应的表格
                 index = my_sql[j].index;
                 filename = my_sql[j].file_name;
-                read_table_data(index, filename);
-                printf_table(index);
+                readTableData(index, filename);
+                printTable(index);
                 flag = 0;
                 break;
             }
@@ -446,11 +250,11 @@ void Create_table(char ins[])
             {
                 //给无名氏表格命名
                 my_sql[j].table_name = tablename;
-                write_my_sql();
+                writeMySQL();
                 index = my_sql[j].index;
                 filename = my_sql[j].file_name;
-                read_table_data(index, filename);
-                printf_table(index);
+                readTableData(index, filename);
+                printTable(index);
                 flag = 0;
                 break;
             }
@@ -468,12 +272,9 @@ void Create_table(char ins[])
     }
 }
 
-//根据指令删除表格
-void Drop_table(char ins[])
-{
-    //先读取数据库状态文件和现有表格列表
-    read_my_sql();
-    read_all_table();
+void HandwrittenDatabases::dropTable(char ins[]) {
+    readMySQL();
+    readAllTables();
 
     //解析指令获取待删除表名
     string tablename;
@@ -509,24 +310,21 @@ void Drop_table(char ins[])
         return;
     }
 
-    write_my_sql(); //更新数据库状态文件
-    read_all_table(); //修改当前表格列表
+    writeMySQL();//更新数据库状态文件
+    readAllTables(); //修改当前表格列表
 }
 
-//查看所有表格
-void Table_list()
-{
-    //先读取数据库状态文件和现有表格列表
-    read_my_sql();
-    read_all_table();
+void HandwrittenDatabases::listTables() {
+    readMySQL();
+    readAllTables();
     //依次读取每张表格的数据
     for (int i = 0; i < table_num; i++)
     {
-        read_table_data(i, all_table[i].file_name);
+        readTableData(i, all_table[i].file_name);
     }
     //打印所有表格信息
     cout << "   Total table number:" << table_num << endl;
-	cout << " 表格名称 ：（列数，行数）[属性列表]" << endl;
+    cout << " 表格名称 ：（列数，行数）[属性列表]" << endl;
     for (int i = 0; i < table_num; i++)
     {
         cout << "      " << all_table[i].table_name << ":";
@@ -543,12 +341,9 @@ void Table_list()
     }
 }
 
-//向表格中插入数据
-void Insert_table_data(char ins[])
-{
-    //先读取数据库状态文件和现有表格列表
-    read_my_sql();
-    read_all_table();
+void HandwrittenDatabases::insertData(char ins[]) {
+    readMySQL();
+    readAllTables();
 
     //解析指令获取表名
     string tablename;
@@ -571,7 +366,7 @@ void Insert_table_data(char ins[])
             //找到了对应的表格
             index = my_sql[j].index;
             filename = my_sql[j].file_name;
-            read_table_data(index, filename);
+            readTableData(index, filename);
             flag = 0;
             break;
         }
@@ -615,10 +410,10 @@ void Insert_table_data(char ins[])
         }
         cout << "INSERT SUCCESS !" << endl;
         all_table[index].row_num++;
-        printf_table(index);
+        printTable(index);
 
         //修改表格文件
-        write_table_data(index, filename);
+        writeTableData(index, filename);
     }
 
     //第二类插入语句
@@ -691,24 +486,18 @@ void Insert_table_data(char ins[])
 
         cout << "INSERT SUCCESS !" << endl;
         all_table[index].row_num++;
-        printf_table(index);
+        printTable(index);
 
-        //修改表格文件
-        write_table_data(index, filename);
+        writeTableData(index, filename);
     }
-
-    else
-    {
+    else {
         cout << "Error instruction!" << endl;
     }
 }
 
-//删除表格数据
-void Delete_table_data(char ins[])
-{
-    //先读取数据库状态文件和现有表格列表
-    read_my_sql();
-    read_all_table();
+void HandwrittenDatabases::deleteData(char ins[]) {
+    readMySQL();
+    readAllTables();
 
     //第一类删除语句
     if (ins[7] == 'F')
@@ -734,7 +523,7 @@ void Delete_table_data(char ins[])
                 //找到了对应的表格
                 index = my_sql[j].index;
                 filename = my_sql[j].file_name;
-                read_table_data(index, filename);
+                readTableData(index, filename);
                 flag = 0;
                 break;
             }
@@ -809,10 +598,9 @@ void Delete_table_data(char ins[])
             all_table[index].row_num--;
 
             cout << "DELETE SUCCESS !" << endl;
-            printf_table(index);
+            printTable(index);
 
-            //修改表格文件
-            write_table_data(index, filename);
+            writeTableData(index, filename);
         }
     }
 
@@ -840,7 +628,7 @@ void Delete_table_data(char ins[])
                 //找到了对应的表格
                 index = my_sql[j].index;
                 filename = my_sql[j].file_name;
-                read_table_data(index, filename);
+                readTableData(index, filename);
                 flag = 0;
                 break;
             }
@@ -853,24 +641,18 @@ void Delete_table_data(char ins[])
 
         all_table[index].row_num = 0; //删除所有行
         cout << "DELETE SUCCESS !" << endl;
-        printf_table(index);
+        printTable(index);
 
-        //修改表格文件
-        write_table_data(index, filename);
+        writeTableData(index, filename);
     }
-
-    else
-    {
+    else {
         cout << "Error instruction!" << endl;
     }
 }
 
-//修改表格数据
-void Updata_table_data(char ins[])
-{
-    //先读取数据库状态文件和现有表格列表
-    read_my_sql();
-    read_all_table();
+void HandwrittenDatabases::updateData(char ins[]) {
+    readMySQL();
+    readAllTables();
 
     //解析指令获取表名
     string tablename;
@@ -893,7 +675,7 @@ void Updata_table_data(char ins[])
             //找到了对应的表格
             index = my_sql[j].index;
             filename = my_sql[j].file_name;
-            read_table_data(index, filename);
+            readTableData(index, filename);
             flag = 0;
             break;
         }
@@ -975,10 +757,10 @@ void Updata_table_data(char ins[])
             }
         }
         cout << "UPDATE SUCCESS !" << endl;
-        printf_table(index);
+        printTable(index);
 
         //修改表格文件
-        write_table_data(index, filename);
+        writeTableData(index, filename);
     }
 
     else if (tag == 2)
@@ -1035,10 +817,10 @@ void Updata_table_data(char ins[])
             }
         }
         cout << "UPDATE SUCCESS !" << endl;
-        printf_table(index);
+        printTable(index);
 
         //修改表格文件
-        write_table_data(index, filename);
+        writeTableData(index, filename);
     }
 
     else
@@ -1047,12 +829,9 @@ void Updata_table_data(char ins[])
     }
 }
 
-//选择表格数据并展示
-void Selete_table_data(char ins[])
-{
-    //先读取数据库状态文件和现有表格列表
-    read_my_sql();
-    read_all_table();
+void HandwrittenDatabases::selectData(char ins[]) {
+    readMySQL();
+    readAllTables();
 
     if (ins[7] == '*')
     {
@@ -1076,7 +855,7 @@ void Selete_table_data(char ins[])
                 //找到了对应的表格
                 index = my_sql[j].index;
                 filename = my_sql[j].file_name;
-                read_table_data(index, filename);
+                readTableData(index, filename);
                 flag = 0;
                 break;
             }
@@ -1090,7 +869,7 @@ void Selete_table_data(char ins[])
         //从TABLE name里选择所有列展示，即展示整个TABLE
         if (ins[i] == '\0')
         {
-            printf_table(index);
+            printTable(index);
         }
 
         //对返回的查询结果按某些列进行排序展示
@@ -1341,7 +1120,7 @@ void Selete_table_data(char ins[])
                     my_sql[my_sql_num].file_name = new_filename;
                     my_sql[my_sql_num].index = table_num;
                     my_sql_num++;
-                    write_my_sql(); //更新数据库状态文件
+                    writeMySQL(); //更新数据库状态文件
 
                 }
             }
@@ -1518,7 +1297,7 @@ void Selete_table_data(char ins[])
                 //找到了对应的表格
                 index = my_sql[j].index;
                 filename = my_sql[j].file_name;
-                read_table_data(index, filename);
+                readTableData(index, filename);
                 tag = 0;
                 break;
             }
@@ -1621,7 +1400,7 @@ void Selete_table_data(char ins[])
                 //找到了对应的表格
                 index = my_sql[j].index;
                 filename = my_sql[j].file_name;
-                read_table_data(index, filename);
+                readTableData(index, filename);
                 flag = 0;
                 break;
             }
@@ -1732,7 +1511,7 @@ void Selete_table_data(char ins[])
                 //找到了对应的表格
                 index = my_sql[j].index;
                 filename = my_sql[j].file_name;
-                read_table_data(index, filename);
+                readTableData(index, filename);
                 tag = 0;
                 break;
             }
@@ -1857,19 +1636,15 @@ void Selete_table_data(char ins[])
     }
 }
 
-//打印表格
-void printf_table(int index)
-{
+void HandwrittenDatabases::printTable(int index) {
     cout << "----------------------------------------" << endl;
     cout << "ID ";
-    for (int i = 0; i < all_table[index].col_num; i++)
-    {
+    for (int i = 0; i < all_table[index].col_num; i++){
         cout << all_table[index].column[i] << " ";
     }
     cout << endl;
     cout << "----------------------------------------" << endl;
-    for (int i = 0; i < all_table[index].row_num; i++)
-    {
+    for (int i = 0; i < all_table[index].row_num; i++){
         cout << i + 1 << " ";
         for (int j = 0; j < all_table[index].col_num; j++)
             cout << table_data[i][j] << " ";
@@ -1878,16 +1653,7 @@ void printf_table(int index)
     }
 }
 
-//打印所有表格列表
-void printf_table_list()
-{
-    for (int i = 0; i < table_num; i++)
-        cout << all_table[i].table_name << " " << all_table[i].file_name << endl;
-}
-
-//判断是否为空行（即m是否为字母）
-bool is_not_endl(char m)
-{
+bool HandwrittenDatabases::isNotEndl(char m) {
     if (((m >= 'a') && (m <= 'z')) || ((m >= 'A') && (m <= 'Z')))
         return true;
     return false;
