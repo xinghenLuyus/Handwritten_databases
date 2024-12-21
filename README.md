@@ -21,7 +21,7 @@
 
 1. 克隆项目到本地：
 
-        git clone https://github.com/yourusername/Handwritten_databases.git
+        git clone https://github.com/xinghenLuyus/Handwritten_databases.git
         cd Handwritten_databases
 
 2. 使用 Visual Studio 打开项目文件，并编译项目。
