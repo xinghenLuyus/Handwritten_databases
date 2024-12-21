@@ -75,4 +75,11 @@ int main() {
 }
 ```
 ## 4. 文件结构
-Handwritten_databases/ ├── HandwrittenDatabases.h ├── HandwrittenDatabases.cpp ├── main.cpp ├── README.md └── ...
+```
+Handwritten_databases/ 
+    ├── HandwrittenDatabases.h 
+    ├── HandwrittenDatabases.cpp 
+    ├── main.cpp 
+    ├── README.md 
+    └── ...
+```
