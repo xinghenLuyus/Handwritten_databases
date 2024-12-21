@@ -32,14 +32,14 @@
 
 以下是一些示例指令，展示了如何使用该数据库系统：
 ```
-CREATE TABLE Student (学号,姓名,专业) TO student.txt
-INSERT INTO Student VALUES (170000001,张三,计算机科学与技术)
-INSERT INTO Student VALUES (170000002,李四,金融系)"
-INSERT INTO Student (学号,姓名) VALUES (170000003,王二)
-INSERT INTO Student (学号,姓名,专业) VALUES (170000004,刘五,微电子)
-SELECT * FROM Student" "UPDATE Student SET 学号 = 170000000, 专业 = 计算机科学与技术 WHERE 姓名 = 张三
-SELECT * FROM Student" "DELETE FROM Student WHERE 姓名 = 张三
-SELECT * FROM Student" "DROP TABLE Student
+createTable(CREATE TABLE Student (学号,姓名,专业) TO student.txt)
+insertData(INSERT INTO Student VALUES (170000001,张三,计算机科学与技术))
+insertData(INSERT INTO Student VALUES (170000002,李四,金融系)")
+insertData(INSERT INTO Student (学号,姓名) VALUES (170000003,王二))
+insertData(INSERT INTO Student (学号,姓名,专业) VALUES (170000004,刘五,微电子))
+selectData(SELECT * FROM Student" "UPDATE Student SET 学号 = 170000000, 专业 = 计算机科学与技术 WHERE 姓名 = 张三)
+selectData(SELECT * FROM Student" "DELETE FROM Student WHERE 姓名 = 张三)
+selectData(SELECT * FROM Student" "DROP TABLE Student)
 ```
 
 ### 3.3 代码示例
@@ -79,7 +79,7 @@ int main() {
 Handwritten_databases/ 
     ├── HandwrittenDatabases.h 
     ├── HandwrittenDatabases.cpp 
-    ├── main.cpp 
+    ├── main.cpp (测试文件)
     ├── README.md 
     └── ...
 ```
