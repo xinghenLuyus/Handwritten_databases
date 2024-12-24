@@ -28,24 +28,65 @@
 
 3. 运行生成的可执行文件。
 
-### 3.2 示例指令
+### 3.2 指令格式
 
-以下是一些示例指令，展示了如何使用该数据库系统：
-```
-createTable(CREATE TABLE Student (学号,姓名,专业) TO student.txt)
-insertData(INSERT INTO Student VALUES (170000001,张三,计算机科学与技术))
-insertData(INSERT INTO Student VALUES (170000002,李四,金融系)")
-insertData(INSERT INTO Student (学号,姓名) VALUES (170000003,王二))
-insertData(INSERT INTO Student (学号,姓名,专业) VALUES (170000004,刘五,微电子))
-selectData(SELECT * FROM Student" "UPDATE Student SET 学号 = 170000000, 专业 = 计算机科学与技术 WHERE 姓名 = 张三)
-selectData(SELECT * FROM Student" "DELETE FROM Student WHERE 姓名 = 张三)
-selectData(SELECT * FROM Student" "DROP TABLE Student)
+1. **创建表**：
+    ```sql
+    createTable(CREATE TABLE <表名> (<列1>, <列2>, ...) TO <文件名>）
+    createTable(CREATE TABLE <表名> FROM <文件名>)
+    ```
+1. **删除表**：
+    ```sql
+    dropTable(DROP TABLE <表名>)
+    ```
+1. **列出表**：
+    ```sql
+    listTables(LIST TABLES)
+    ```
+1. **插入数据**：
+    ```sql
+    insertData(INSERT INTO <表名> VALUES (<值1>, <值2>, ...))
+    insertData(INSERT INTO <表名> (<列1>, <列2>, ...) VALUES (<值1>, <值2>, ...))
+    ```
+1. **删除数据**：
+    ```sql
+    deleteData(DELETE FROM <表名> WHERE <列n>=<值n>)
+    deleteData(DELETE * FROM <表名>)
+    ```
+1. **更新数据**：
+    ```sql
+    updateData(UPDATE <表名> SET <列1>=<值1>, <列2>=<值2>, ...)
+    updateData(UPDATE <表名> SET <列1>=<值1>, <列2>=<值2>, ... WHERE <列n>=<值n>)
+    ```
+1. **查询数据**：
+    ```sql
+    selectData(SELECT * FROM <表名>)
+    selectData(SELECT <列1>, <列2>, ... FROM <表名>)
+    selectData(SELECT * FROM <表名> ORDER BY <列1>, <列2>, ...ASC/DESC)
+                                                     // ASC: 升序，DESC: 降序
+    selectData(SELECT <列1>, <列2>, ... FROM <表名> WHERE <列n>=<值n>)
+    selectData(SELECT <列1>, <列2>, ... FROM <表名> TO <文件名>)
+    ```
+
+
+### 3.3 示例指令
+
+##### 以下是一些示例指令，展示了如何使用该数据库系统：
+```sql
+    createTable(CREATE TABLE Student (学号,姓名,专业) TO student.txt)
+    insertData(INSERT INTO Student VALUES (170000001,张三,计算机科学与技术))
+    insertData(INSERT INTO Student VALUES (170000002,李四,金融系)")
+    insertData(INSERT INTO Student (学号,姓名) VALUES (170000003,王二))
+    insertData(INSERT INTO Student (学号,姓名,专业) VALUES (170000004,刘五,微电子))
+    selectData(SELECT * FROM Student" "UPDATE Student SET 学号 = 170000000, 专业 = 计算机科学与技术 WHERE 姓名 = 张三)
+    selectData(SELECT * FROM Student" "DELETE FROM Student WHERE 姓名 = 张三)
+    selectData(SELECT * FROM Student" "DROP TABLE Student)
 ```
 
-### 3.3 代码示例
+### 3.4 代码示例
 
-以下是一个简单的 `main.cpp` 文件示例，展示了如何使用 `HandwrittenDatabases` 类：
-```
+##### 以下是一个简单的 `main.cpp` 文件示例，展示了如何使用 `HandwrittenDatabases` 类：
+```cpp
 #include "HandwrittenDatabases.h"
 #include <iostream>
 #include <string>
